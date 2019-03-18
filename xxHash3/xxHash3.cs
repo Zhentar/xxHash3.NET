@@ -37,6 +37,7 @@ namespace xxHash3
 		const int KEYSET_DEFAULT_SIZE = 48;
 		const int STRIPE_BYTES = 64;
 		const int STRIPE_ELEMENTS = (STRIPE_BYTES / sizeof(uint));
+		const int STRIPES_PER_BLOCK = (KEYSET_DEFAULT_SIZE - STRIPE_ELEMENTS) / 2;
 
 		const uint kKey_1_left = 0xb8fe6c39;
 		const uint kKey_1_right = 0x23a44bbe;
@@ -212,7 +213,7 @@ namespace xxHash3
 		{
 #if NETCOREAPP3_0
 
-			if(Sse2.IsSupported)
+			if(Sse2.IsSupported && false)
 			{
 				var stripeVec = MemoryMarshal.Cast<Stripe, Vector128<uint>>(
 										MemoryMarshal.CreateReadOnlySpan(ref Unsafe.AsRef(in data), 1));
@@ -234,7 +235,6 @@ namespace xxHash3
 			//get the bounds checks out of the way from the start so they aren't repeated
 			if ((uint)acc.Length < 8u || (uint)keys.Length < 8u) { throw new IndexOutOfRangeException(); }
 			//Hand unrolled...
-			AccumulateOnePair(ref acc[7], data.H, keys[7]);
 			AccumulateOnePair(ref acc[0], data.A, keys[0]);
 			AccumulateOnePair(ref acc[1], data.B, keys[1]);
 			AccumulateOnePair(ref acc[2], data.C, keys[2]);
@@ -242,6 +242,7 @@ namespace xxHash3
 			AccumulateOnePair(ref acc[4], data.E, keys[4]);
 			AccumulateOnePair(ref acc[5], data.F, keys[5]);
 			AccumulateOnePair(ref acc[6], data.G, keys[6]);
+			AccumulateOnePair(ref acc[7], data.H, keys[7]);
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -250,34 +251,76 @@ namespace xxHash3
 			var dataLeft = value.Left;
 			var dataRight = value.Right;
 			var mul = Multiply32to64(dataLeft + key.Left, dataRight + key.Right);
-			acc += mul + value.Value64;
+			acc += mul + dataLeft + ((ulong)dataRight << 32);
 		}
+
+
+#if NETCOREAPP3_0
+		private static int AccumulateStripes_SSE2(in ReadOnlySpan<byte> userData, in Span<ulong> accumulators)
+		{
+			const int VEC128_PER_STRIPE = STRIPE_BYTES / 16;
+			var keys = MemoryMarshal.Cast<uint, KeyPair>(kKey);
+			var dataVec = MemoryMarshal.Cast<byte, Vector128<uint>>(userData);
+			var accVec = MemoryMarshal.Cast<ulong, Vector128<ulong>>(accumulators);
+
+			while (dataVec.Length >= STRIPES_PER_BLOCK * VEC128_PER_STRIPE)
+			{
+				for (int i = 0; i < VEC128_PER_STRIPE; i++)
+				{
+					var acc = accVec[i];
+					for (int j = 0; j < STRIPES_PER_BLOCK; j++)
+					{
+						var key = Unsafe.As<KeyPair, Vector128<uint>>(ref keys[i * (Unsafe.SizeOf<Vector128<uint>>() / Unsafe.SizeOf<KeyPair>()) + j]);
+						var data = dataVec[i + j * VEC128_PER_STRIPE];
+						var dk = Sse2.Add(data, key);
+						var shuff = Sse2.Shuffle(dk, 0x31);
+						Vector128<ulong> res = Sse2.Multiply(dk, shuff);
+						Vector128<ulong> add = Sse2.Add(data.AsUInt64(), acc);
+						acc = Sse2.Add(res, add);
+					}
+
+					var shifted = Sse2.ShiftRightLogical(acc, 47);
+					acc = Sse2.Xor(acc, shifted);
+					var k = Unsafe.As<KeyPair, Vector128<uint>>(ref keys[i * (Unsafe.SizeOf<Vector128<uint>>() / Unsafe.SizeOf<KeyPair>()) + STRIPES_PER_BLOCK]);
+					var accKey = Sse2.Multiply(acc.AsUInt32(), k);
+					var dataShuff = Sse2.Shuffle(acc.AsUInt32(), 0x31);
+					var keyShuff = Sse2.Shuffle(k, 0x31);
+					var dk2 = Sse2.Multiply(dataShuff, keyShuff);
+					accVec[i] = Sse2.Xor(accKey, dk2);
+
+				}
+				
+				dataVec = dataVec.Slice(STRIPES_PER_BLOCK * VEC128_PER_STRIPE);
+			}
+
+			int remainingStripes = dataVec.Length / VEC128_PER_STRIPE;
+
+			/* last partial block */
+			for (int i = 0; i < VEC128_PER_STRIPE; i++)
+			{
+				var acc = accVec[i];
+				for (int j = 0; j < remainingStripes; j++)
+				{
+					var key = Unsafe.As<KeyPair, Vector128<uint>>(ref keys[i * (Unsafe.SizeOf<Vector128<uint>>() / Unsafe.SizeOf<KeyPair>()) + j]);
+					var data = dataVec[i + j * VEC128_PER_STRIPE];
+					var dk = Sse2.Add(data, key);
+					var shuff = Sse2.Shuffle(dk, 0x31);
+					Vector128<ulong> res = Sse2.Multiply(dk, shuff);
+					Vector128<ulong> add = Sse2.Add(data.AsUInt64(), acc);
+					acc = Sse2.Add(res, add);
+				}
+				accVec[i] = acc;
+			}
+
+			return remainingStripes;
+		}
+
+#endif
+
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		private static void ScrambleAccumulators(in Span<ulong> acc, in ReadOnlySpan<uint> key)
 		{
-#if NETCOREAPP3_0
-
-			if (Sse2.IsSupported)
-			{
-				var keysVec = MemoryMarshal.Cast<uint, Vector128<uint>>(key);
-				var accVec = MemoryMarshal.Cast<ulong, Vector128<ulong>>(acc);
-				for (int i = 0; i < keysVec.Length; i++)
-				{
-					var data = accVec[i];
-					var shifted = Sse2.ShiftRightLogical(data, 47);
-					data = Sse2.Xor(data, shifted);
-					var k = keysVec[i];
-					var dk = Sse2.Multiply(data.AsUInt32(), k);
-					var dataShuff = Sse2.Shuffle(data.AsUInt32(), 0x31);
-					var keyShuff = Sse2.Shuffle(k, 0x31);
-					var dk2 = Sse2.Multiply(dataShuff, keyShuff);
-					accVec[i] = Sse2.Xor(dk, dk2);
-				}
-				return;
-			}
-#endif
-
 			for (int i = 0; i < acc.Length; i++)
 			{
 				acc[i] ^= acc[i] >> 47;
@@ -299,32 +342,41 @@ namespace xxHash3
 
 		public static void LongSequenceHashInternal(in Span<ulong> acc, in ReadOnlySpan<byte> data)
 		{
-			const int NB_KEYS = (KEYSET_DEFAULT_SIZE - STRIPE_ELEMENTS) / 2;
-
+			int partialBlockStripes = 0;
 			var keys = MemoryMarshal.Cast<uint, KeyPair>(kKey);
-			var stripes = MemoryMarshal.Cast<byte, Stripe>(data);
 
-			while(stripes.Length >= NB_KEYS)
+#if NETCOREAPP3_0
+			if (Sse2.IsSupported)
 			{
-				var blockStripes = stripes.Slice(0, NB_KEYS);
-				stripes = stripes.Slice(NB_KEYS);
-				AccumulateStripeBlock(acc, blockStripes, keys);
-				ScrambleAccumulators(acc, kKey.AsSpan(KEYSET_DEFAULT_SIZE - STRIPE_ELEMENTS));
+				partialBlockStripes = AccumulateStripes_SSE2(data, acc);
+			}
+			else
+#endif
+			{
+				var stripes = MemoryMarshal.Cast<byte, Stripe>(data);
+				
+				while (stripes.Length >= STRIPES_PER_BLOCK)
+				{
+					var blockStripes = stripes.Slice(0, STRIPES_PER_BLOCK);
+					stripes = stripes.Slice(STRIPES_PER_BLOCK);
+					AccumulateStripeBlock(acc, blockStripes, keys);
+					ScrambleAccumulators(acc, kKey.AsSpan(KEYSET_DEFAULT_SIZE - STRIPE_ELEMENTS));
+				}
+
+				/* last partial block */
+				AccumulateStripeBlock(acc, stripes, keys);
+				partialBlockStripes = stripes.Length;
 			}
 
-
-			/* last partial block */
-			AccumulateStripeBlock(acc, stripes, keys);
-
 			/* last stripe */
-			if ((data.Length & (Unsafe.SizeOf<Stripe>())) != 0)
+			if ((data.Length & (Unsafe.SizeOf<Stripe>() - 1)) != 0)
 			{
 #if NETSTANDARD2_0
 				ref readonly Stripe stripe = ref MemoryMarshal.Cast<byte, Stripe>(data.Slice(data.Length - Unsafe.SizeOf<Stripe>()))[0];
 #else
 				ref readonly Stripe stripe = ref MemoryMarshal.AsRef<Stripe>(data.Slice(data.Length - Unsafe.SizeOf<Stripe>()));
 #endif
-				AccumulateStripe(acc, stripe , keys.Slice(stripes.Length));
+				AccumulateStripe(acc, stripe , keys.Slice(partialBlockStripes));
 			}
 		}
 
