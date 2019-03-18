@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 
 #if !NETSTANDARD2_0
 using System.Runtime.Intrinsics.X86;
+using System.Runtime.Intrinsics;
 #endif
 
 
@@ -34,7 +35,8 @@ namespace xxHash3
 			0x45cb3a8f,0x95160428,0xafd7fbca,0xbb4b407e,
 		};
 		const int KEYSET_DEFAULT_SIZE = 48;
-		const int STRIPE_ELEMENTS = (64 / sizeof(uint));
+		const int STRIPE_BYTES = 64;
+		const int STRIPE_ELEMENTS = (STRIPE_BYTES / sizeof(uint));
 
 		const uint kKey_1_left = 0xb8fe6c39;
 		const uint kKey_1_right = 0x23a44bbe;
@@ -54,6 +56,12 @@ namespace xxHash3
 			public readonly UintPair F;
 			public readonly UintPair G;
 			public readonly UintPair H;
+		}
+
+		[StructLayout(LayoutKind.Sequential)]
+		private unsafe struct StripeBytes
+		{
+			public fixed byte Bytes[STRIPE_BYTES];
 		}
 
 		[StructLayout(LayoutKind.Sequential)]
@@ -202,10 +210,31 @@ namespace xxHash3
 
 		private static void AccumulateStripe(in Span<ulong> acc, in Stripe data, in ReadOnlySpan<KeyPair> keys)
 		{
-			//TODO: SSE2
+#if NETCOREAPP3_0
+
+			if(Sse2.IsSupported)
+			{
+				var stripeVec = MemoryMarshal.Cast<Stripe, Vector128<uint>>(
+										MemoryMarshal.CreateReadOnlySpan(ref Unsafe.AsRef(in data), 1));
+				var keysVec = MemoryMarshal.Cast<KeyPair, Vector128<uint>>(keys);
+				var accVec = MemoryMarshal.Cast<ulong, Vector128<ulong>>(acc);
+				for (int i = 0; i < stripeVec.Length; i++)
+				{
+					var d = stripeVec[i];
+					var dk = Sse2.Add(d, keysVec[i]);
+					var shuff = Sse2.Shuffle(dk, 0x31);
+					Vector128<ulong> res = Sse2.Multiply(dk, shuff);
+					Vector128<ulong> add = Sse2.Add(d.AsUInt64(), accVec[i]);
+					accVec[i] = Sse2.Add(res, add);
+				}
+				return;
+			}
+#endif
+
 			//get the bounds checks out of the way from the start so they aren't repeated
 			if ((uint)acc.Length < 8u || (uint)keys.Length < 8u) { throw new IndexOutOfRangeException(); }
 			//Hand unrolled...
+			AccumulateOnePair(ref acc[7], data.H, keys[7]);
 			AccumulateOnePair(ref acc[0], data.A, keys[0]);
 			AccumulateOnePair(ref acc[1], data.B, keys[1]);
 			AccumulateOnePair(ref acc[2], data.C, keys[2]);
@@ -213,7 +242,6 @@ namespace xxHash3
 			AccumulateOnePair(ref acc[4], data.E, keys[4]);
 			AccumulateOnePair(ref acc[5], data.F, keys[5]);
 			AccumulateOnePair(ref acc[6], data.G, keys[6]);
-			AccumulateOnePair(ref acc[7], data.H, keys[7]);
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -228,7 +256,28 @@ namespace xxHash3
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		private static void ScrambleAccumulators(in Span<ulong> acc, in ReadOnlySpan<uint> key)
 		{
-			//TODO: SSE2
+#if NETCOREAPP3_0
+
+			if (Sse2.IsSupported)
+			{
+				var keysVec = MemoryMarshal.Cast<uint, Vector128<uint>>(key);
+				var accVec = MemoryMarshal.Cast<ulong, Vector128<ulong>>(acc);
+				for (int i = 0; i < keysVec.Length; i++)
+				{
+					var data = accVec[i];
+					var shifted = Sse2.ShiftRightLogical(data, 47);
+					data = Sse2.Xor(data, shifted);
+					var k = keysVec[i];
+					var dk = Sse2.Multiply(data.AsUInt32(), k);
+					var dataShuff = Sse2.Shuffle(data.AsUInt32(), 0x31);
+					var keyShuff = Sse2.Shuffle(k, 0x31);
+					var dk2 = Sse2.Multiply(dataShuff, keyShuff);
+					accVec[i] = Sse2.Xor(dk, dk2);
+				}
+				return;
+			}
+#endif
+
 			for (int i = 0; i < acc.Length; i++)
 			{
 				acc[i] ^= acc[i] >> 47;
