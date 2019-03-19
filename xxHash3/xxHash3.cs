@@ -7,7 +7,9 @@ using System.Runtime.CompilerServices;
 
 namespace xxHash3
 {
+#pragma warning disable IDE1006 // Naming Styles
 	public partial class xxHash3
+#pragma warning restore IDE1006 // Naming Styles
 	{
 		private const ulong PRIME64_1 = 11400714785074694791UL;
 		private const ulong PRIME64_2 = 14029467366897019727UL;
@@ -256,7 +258,7 @@ namespace xxHash3
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		static void AccumulateStripeBlock(in Span<ulong> acc, in ReadOnlySpan<Stripe> stripes, ReadOnlySpan<KeyPair> key)
+		private static void AccumulateStripeBlock(in Span<ulong> acc, in ReadOnlySpan<Stripe> stripes, ReadOnlySpan<KeyPair> key)
 		{
 			for (int i = 0; i < stripes.Length; i++)
 			{
@@ -265,10 +267,18 @@ namespace xxHash3
 			}
 		}
 
-		public static void LongSequenceHashInternal(in Span<ulong> acc, in ReadOnlySpan<byte> data)
+		public static bool UseAvx2;
+		public static bool UseSse2;
+
+		private static void LongSequenceHashInternal(in Span<ulong> acc, in ReadOnlySpan<byte> data)
 		{
 #if NETCOREAPP3_0
-			if (System.Runtime.Intrinsics.X86.Sse2.IsSupported)
+			if (System.Runtime.Intrinsics.X86.Avx2.IsSupported && UseAvx2)
+			{
+				AccumulateStripes_AVX2(data, acc);
+				return;
+			}
+			if (System.Runtime.Intrinsics.X86.Sse2.IsSupported && UseSse2)
 			{
 				AccumulateStripes_SSE2(data, acc);
 				return;
@@ -333,7 +343,7 @@ namespace xxHash3
 			return MergeAccumulators(acc, (ulong)data.Length * PRIME64_1);
 		}
 
-		static unsafe ulong MultiplyAdd64(ulong lhs, ulong rhs)
+		private static unsafe ulong MultiplyAdd64(ulong lhs, ulong rhs)
 		{
 #if NETCOREAPP3_0
 			if(System.Runtime.Intrinsics.X86.Bmi2.X64.IsSupported)
@@ -376,9 +386,7 @@ namespace xxHash3
 //				return low + ((ulong)high << 32);
 //			}
 //#endif
-
 			return a * (ulong)b;
-
 		}
 	}
 }

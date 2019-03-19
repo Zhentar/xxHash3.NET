@@ -11,6 +11,7 @@ using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Order;
+using System.Linq;
 
 namespace xxHash3
 {
@@ -19,12 +20,14 @@ namespace xxHash3
 		static void Main()
 		{
 
-//#if RELEASE
-			var config = DefaultConfig.Instance.With(ConfigOptions.DisableOptimizationsValidator)
-											   .With(new DefaultOrderer(SummaryOrderPolicy.FastestToSlowest));
-			BenchmarkDotNet.Running.BenchmarkRunner.Run<LibComparison>(config);
+#if RELEASE
+			//var config = DefaultConfig.Instance.With(ConfigOptions.DisableOptimizationsValidator)
+			//								   .With(new DefaultOrderer(SummaryOrderPolicy.FastestToSlowest));
+			//BenchmarkDotNet.Running.BenchmarkRunner.Run<LibComparison>(config);
+
+			BenchmarkRunner.Run<LongKeyTests>();
 			return;
-//#endif
+#endif
 			foreach (var len in new [] { 0, 1,14, 101})
 			{
 				var bytes = ReferenceBytes(len);
@@ -97,7 +100,7 @@ namespace xxHash3
 			return $"{MBps:N1} MB/s";
 		}
 
-		public bool IsAvailable(Summary summary) => true;
+		public bool IsAvailable(Summary summary) => summary.BenchmarksCases.FirstOrDefault()?.Parameters.Items.Any() ?? false;
 		public bool AlwaysShow => true;
 		public ColumnCategory Category => ColumnCategory.Metric;
 		public int PriorityInCategory => 0;
@@ -150,6 +153,7 @@ namespace xxHash3
 		private byte[] _bytes;
 
 		//[Params(5, 10, 50, 1000, 1_000_000)]
+		[Params(1_000_000)]
 		public int ByteLength { get; set; } = 1_000_000;
 
 		[GlobalSetup]
@@ -167,11 +171,18 @@ namespace xxHash3
 			return bytes;
 		}
 
-		[Benchmark]
-		public uint XxHash32() => xxHash32.Hash(_bytes);
 
 		[Benchmark]
 		public ulong XxHash64() => xxHash64.Hash(_bytes);
+
+		[Benchmark]
+		public ulong XxHash3AVX2()
+		{
+			xxHash3.UseAvx2 = true;
+			var result = xxHash3.Hash64(_bytes);
+			xxHash3.UseAvx2 = false;
+			return result;
+		}
 
 		[Benchmark]
 		public ulong XxHash3() => xxHash3.Hash64(_bytes);
@@ -224,74 +235,73 @@ namespace xxHash3
 			return result;
 		}
 
-		[Benchmark]
-		public int SimpleMultHash()
-		{
-			int result = 0;
-			foreach (var bytes in TestData)
-			{
-				var byteSpan = new ReadOnlySpan<byte>(bytes);
-				for (int i = 0; i < 111; i++)
-					result ^= GetStringHash(byteSpan);
-			}
-			return result;
+		//[Benchmark]
+		//public int SimpleMultHash()
+		//{
+		//	int result = 0;
+		//	foreach (var bytes in TestData)
+		//	{
+		//		var byteSpan = new ReadOnlySpan<byte>(bytes);
+		//		for (int i = 0; i < 111; i++)
+		//			result ^= GetStringHash(byteSpan);
+		//	}
+		//	return result;
 
-			static int GetStringHash(ReadOnlySpan<byte> bytes)
-			{
-				int result = 0;
-				foreach (var nextByte in bytes)
-				{
-					result = (result * 31) ^ nextByte;
-				}
-				return result;
-			}
-		}
+		//	static int GetStringHash(ReadOnlySpan<byte> bytes)
+		//	{
+		//		int result = 0;
+		//		foreach (var nextByte in bytes)
+		//		{
+		//			result = (result * 31) ^ nextByte;
+		//		}
+		//		return result;
+		//	}
+		//}
 	}
 
-	[Orderer(SummaryOrderPolicy.FastestToSlowest, MethodOrderPolicy.Declared)]
-	[Config(typeof(MyConfig))]
-	public class LibComparison
-	{
-		private byte[] _bytes;
+	//[Config(typeof(MyConfig))]
+	//public class LibComparison
+	//{
+	//	private byte[] _bytes;
 
-		[Params(15, 1_000_000)]
-		public int ByteLength { get; set; } = 1000000;
+	//	[Params(15, 1_000_000)]
+	//	public int ByteLength { get; set; } = 1000000;
 
-		[GlobalSetup]
-		public void Setup() => _bytes = LongKeyTests.GetRandomBytes(1337, ByteLength);
+	//	[GlobalSetup]
+	//	public void Setup() => _bytes = LongKeyTests.GetRandomBytes(1337, ByteLength);
 
-		[Benchmark]
-		public uint Zhent_xxHash32() => xxHash32.Hash(_bytes);
+	//	[Benchmark]
+	//	public uint Zhent_xxHash32() => xxHash32.Hash(_bytes);
 
-		[Benchmark]
-		public ulong Zhent_xxHash64() => xxHash64.Hash(_bytes);
+	//	[Benchmark]
+	//	public ulong Zhent_xxHash64() => xxHash64.Hash(_bytes);
 
-		[Benchmark]
-		public ulong HashFunctions_xxHash64() => BitConverter.ToUInt64(ixxHash.ComputeHash(_bytes).Hash);
-		private static readonly System.Data.HashFunction.xxHash.IxxHash ixxHash = System.Data.HashFunction.xxHash.xxHashFactory.Instance.Create(new System.Data.HashFunction.xxHash.xxHashConfig { HashSizeInBits = 64 });
+	//	[Benchmark]
+	//	public ulong HashFunctions_xxHash64() => BitConverter.ToUInt64(ixxHash.ComputeHash(_bytes).Hash);
+	//	private static readonly System.Data.HashFunction.xxHash.IxxHash ixxHash = System.Data.HashFunction.xxHash.xxHashFactory.Instance.Create(new System.Data.HashFunction.xxHash.xxHashConfig { HashSizeInBits = 64 });
 
-		[Benchmark]
-		public ulong xxHashSharp_xxHash32() => xxHashSharp.xxHash.CalculateHash(_bytes);
+	//	[Benchmark]
+	//	public ulong xxHashSharp_xxHash32() => xxHashSharp.xxHash.CalculateHash(_bytes);
 
-		[Benchmark]
-		public ulong NeoSmart_xxHash64() => NeoSmart.Hashing.XXHash.XXHash64.Hash(_bytes);
+	//	[Benchmark]
+	//	public ulong NeoSmart_xxHash64() => NeoSmart.Hashing.XXHash.XXHash64.Hash(_bytes);
 
-		[Benchmark]
-		public ulong core20_xxHash64()
-		{
-			core20.Initialize();
-			core20.TransformFinalBlock(_bytes, 0, _bytes.Length);
-			return BitConverter.ToUInt64(core20.Hash);
-		}
-		private static readonly Extensions.Data.XXHash64 core20 = Extensions.Data.XXHash64.Create();
+	//	[Benchmark]
+	//	public ulong core20_xxHash64()
+	//	{
+	//		core20.Initialize();
+	//		core20.TransformFinalBlock(_bytes, 0, _bytes.Length);
+	//		return BitConverter.ToUInt64(core20.Hash);
+	//	}
+	//	private static readonly Extensions.Data.XXHash64 core20 = Extensions.Data.XXHash64.Create();
 
-		[Benchmark]
-		public ulong yyproj_xxHash64()
-		{
-			yyproj.Initialize();
-			yyproj.TransformFinalBlock(_bytes, 0, _bytes.Length);
-			return BitConverter.ToUInt64(yyproj.Hash);
-		}
-		private static readonly Benchmarks.YYProject_XXHash64 yyproj = Benchmarks.YYProject_XXHash64.Create();
-	}
+	//	[Benchmark]
+	//	public ulong yyproj_xxHash64()
+	//	{
+	//		yyproj.Initialize();
+	//		yyproj.TransformFinalBlock(_bytes, 0, _bytes.Length);
+	//		return BitConverter.ToUInt64(yyproj.Hash);
+	//	}
+	//	private static readonly Benchmarks.YYProject_XXHash64 yyproj = Benchmarks.YYProject_XXHash64.Create();
+	//}
 }
