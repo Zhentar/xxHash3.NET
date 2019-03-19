@@ -49,18 +49,18 @@ namespace xxHash3
 					h64 ^= Unsafe.As<byte, uint>(ref remaining) * PRIME64_1;
 					h64 = RotateLeft(h64, 23) * PRIME64_2;
 					h64 += PRIME64_3;
-					Unsafe.Add(ref remaining, sizeof(uint));
+					remaining = ref Unsafe.Add(ref remaining, sizeof(uint));
 				}
 
 				switch (remainingBytes.Length % sizeof(uint))
 				{
 					case 3:
 						h64 = RotateLeft(h64 ^ remaining * PRIME64_5, 11) * PRIME64_1;
-						Unsafe.Add(ref remaining, 1);
+						remaining = ref Unsafe.Add(ref remaining, 1);
 						goto case 2;
 					case 2:
 						h64 = RotateLeft(h64 ^ remaining * PRIME64_5, 11) * PRIME64_1;
-						Unsafe.Add(ref remaining, 1);
+						remaining = ref Unsafe.Add(ref remaining, 1);
 						goto case 1;
 					case 1:
 						h64 = RotateLeft(h64 ^ remaining * PRIME64_5, 11) * PRIME64_1;

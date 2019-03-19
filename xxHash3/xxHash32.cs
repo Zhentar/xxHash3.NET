@@ -65,17 +65,42 @@ namespace xxHash3
 
 				h32 += (uint)buffer.Length;
 
-				var uintSpan = remainingBytes.PopAll<uint>();
-				for (int i = 0; i < uintSpan.Length; i++)
+
+				ref uint remainingInt = ref Unsafe.As<byte, uint>(ref MemoryMarshal.GetReference(remainingBytes));
+
+
+				switch (remainingBytes.Length >> 2)
 				{
-					h32 += uintSpan[i] * PRIME32_3;
-					h32 = RotateLeft(h32, 17) * PRIME32_4;
+					case 3:
+						h32 = RotateLeft(h32 + remainingInt * PRIME32_3, 17) * PRIME32_4;
+						remainingInt = ref Unsafe.Add(ref remainingInt, 1);
+						goto case 2;
+					case 2:
+						h32 = RotateLeft(h32 + remainingInt * PRIME32_3, 17) * PRIME32_4;
+						remainingInt = ref Unsafe.Add(ref remainingInt, 1);
+						goto case 1;
+					case 1:
+						h32 = RotateLeft(h32 + remainingInt * PRIME32_3, 17) * PRIME32_4;
+						remainingInt = ref Unsafe.Add(ref remainingInt, 1);
+						break;
 				}
 
-				for (int i = 0; i < remainingBytes.Length; i++)
+
+				ref byte remaining = ref Unsafe.As<uint, byte>(ref remainingInt);
+
+				switch (remainingBytes.Length % sizeof(uint))
 				{
-					h32 += remainingBytes[i] * PRIME32_5;
-					h32 = RotateLeft(h32, 11) * PRIME32_1;
+					case 3:
+						h32 = RotateLeft(h32 + remaining * PRIME32_5, 11) * PRIME32_1;
+						remaining = ref Unsafe.Add(ref remaining, 1);
+						goto case 2;
+					case 2:
+						h32 = RotateLeft(h32 + remaining * PRIME32_5, 11) * PRIME32_1;
+						remaining = ref Unsafe.Add(ref remaining, 1);
+						goto case 1;
+					case 1:
+						h32 = RotateLeft(h32 + remaining * PRIME32_5, 11) * PRIME32_1;
+						break;
 				}
 
 				h32 ^= h32 >> 15;

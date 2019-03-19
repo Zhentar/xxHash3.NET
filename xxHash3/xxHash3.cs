@@ -213,7 +213,7 @@ namespace xxHash3
 		{
 #if NETCOREAPP3_0
 
-			if(Sse2.IsSupported && false)
+			if(Sse2.IsSupported)
 			{
 				var stripeVec = MemoryMarshal.Cast<Stripe, Vector128<uint>>(
 										MemoryMarshal.CreateReadOnlySpan(ref Unsafe.AsRef(in data), 1));
@@ -235,6 +235,7 @@ namespace xxHash3
 			//get the bounds checks out of the way from the start so they aren't repeated
 			if ((uint)acc.Length < 8u || (uint)keys.Length < 8u) { throw new IndexOutOfRangeException(); }
 			//Hand unrolled...
+			AccumulateOnePair(ref acc[7], data.H, keys[7]);
 			AccumulateOnePair(ref acc[0], data.A, keys[0]);
 			AccumulateOnePair(ref acc[1], data.B, keys[1]);
 			AccumulateOnePair(ref acc[2], data.C, keys[2]);
@@ -242,7 +243,6 @@ namespace xxHash3
 			AccumulateOnePair(ref acc[4], data.E, keys[4]);
 			AccumulateOnePair(ref acc[5], data.F, keys[5]);
 			AccumulateOnePair(ref acc[6], data.G, keys[6]);
-			AccumulateOnePair(ref acc[7], data.H, keys[7]);
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
