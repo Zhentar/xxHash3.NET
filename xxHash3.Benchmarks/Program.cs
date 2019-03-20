@@ -153,7 +153,7 @@ namespace xxHash3
 		private byte[] _bytes;
 
 		//[Params(5, 10, 50, 1000, 1_000_000)]
-		[Params(1_000_000)]
+		[Params(512 * 1024)]
 		public int ByteLength { get; set; } = 1_000_000;
 
 		[GlobalSetup]
@@ -172,7 +172,7 @@ namespace xxHash3
 		}
 
 
-		[Benchmark]
+		//[Benchmark]
 		public ulong XxHash64() => xxHash64.Hash(_bytes);
 
 		[Benchmark]
@@ -184,7 +184,7 @@ namespace xxHash3
 			return result;
 		}
 
-		[Benchmark]
+		//[Benchmark]
 		public ulong XxHash3() => xxHash3.Hash64(_bytes);
 	}
 

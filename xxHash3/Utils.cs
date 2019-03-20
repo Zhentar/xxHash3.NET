@@ -34,5 +34,19 @@ namespace xxHash3
 			if (BitConverter.IsLittleEndian) { return @this; }
 			return BinaryPrimitives.ReverseEndianness(@this);
 		}
+
+		public static bool TryPop<TTo>(this ref ReadOnlySpan<byte> @this, int count, out ReadOnlySpan<TTo> popped) where TTo : struct
+		{
+			var byteCount = count * Unsafe.SizeOf<TTo>();
+			if (@this.Length >= byteCount)
+			{
+				popped = MemoryMarshal.Cast<byte, TTo>(@this.Slice(0, byteCount));
+				@this = @this.Slice(byteCount);
+				return true;
+			}
+			popped = default;
+			return false;
+		}
+
 	}
 }
