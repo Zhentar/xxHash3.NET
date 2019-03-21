@@ -15,7 +15,7 @@ namespace xxHash3
 		}
 
 		[StructLayout(LayoutKind.Explicit)]
-		private struct Keys_AVX2
+		private readonly struct Keys_AVX2
 		{
 			[FieldOffset(0)]   public readonly Vec256Pair<uint> K00;
 			[FieldOffset(8)]   public readonly Vec256Pair<uint> K01;
@@ -57,66 +57,20 @@ namespace xxHash3
 			public readonly Vec256Pair<uint> S15;
 		}
 
-
 		private static int AccumulateStripes_AVX2(in ReadOnlySpan<byte> userData, in Span<ulong> accumulators)
 		{
-			var keys = MemoryMarshal.Cast<uint, KeyPair>(kKey);
-			const int VEC256_PER_STRIPE = STRIPE_BYTES / 32;
-			ref var keys2 = ref MemoryMarshal.AsRef<Keys_AVX2>(MemoryMarshal.Cast<uint, byte>(kKey));
-
 			ref var accPair = ref MemoryMarshal.AsRef<Vec256Pair<ulong>>(MemoryMarshal.AsBytes(accumulators));
-
-			var accVec = MemoryMarshal.Cast<ulong, Vector256<ulong>>(accumulators);
-			var accA = accVec[0];
-			var accB = accVec[1];
-			var scramKeyA = keys2.Scramble.A;
-			var scramKeyB = keys2.Scramble.B;
 
 			var unprocessedData = userData;
 			var blocks = unprocessedData.PopAll<StripeBlock_AVX2>();
-			for (int i = 0; i < blocks.Length; i++)
-			{
-				ref readonly var block = ref blocks[i];
 
-				accA = ProcessStripePiece_AVX2(keys2.K00.A, accA, block.S00.A);
-				accB = ProcessStripePiece_AVX2(keys2.K00.B, accB, block.S00.B);
-				accA = ProcessStripePiece_AVX2(keys2.K01.A, accA, block.S01.A);
-				accB = ProcessStripePiece_AVX2(keys2.K01.B, accB, block.S01.B);
-				accA = ProcessStripePiece_AVX2(keys2.K02.A, accA, block.S02.A);
-				accB = ProcessStripePiece_AVX2(keys2.K02.B, accB, block.S02.B);
-				accA = ProcessStripePiece_AVX2(keys2.K03.A, accA, block.S03.A);
-				accB = ProcessStripePiece_AVX2(keys2.K03.B, accB, block.S03.B);
-				accA = ProcessStripePiece_AVX2(keys2.K04.A, accA, block.S04.A);
-				accB = ProcessStripePiece_AVX2(keys2.K04.B, accB, block.S04.B);
-				accA = ProcessStripePiece_AVX2(keys2.K05.A, accA, block.S05.A);
-				accB = ProcessStripePiece_AVX2(keys2.K05.B, accB, block.S05.B);
-				accA = ProcessStripePiece_AVX2(keys2.K06.A, accA, block.S06.A);
-				accB = ProcessStripePiece_AVX2(keys2.K06.B, accB, block.S06.B);
-				accA = ProcessStripePiece_AVX2(keys2.K07.A, accA, block.S07.A);
-				accB = ProcessStripePiece_AVX2(keys2.K07.B, accB, block.S07.B);
-				accA = ProcessStripePiece_AVX2(keys2.K08.A, accA, block.S08.A);
-				accB = ProcessStripePiece_AVX2(keys2.K08.B, accB, block.S08.B);
-				accA = ProcessStripePiece_AVX2(keys2.K09.A, accA, block.S09.A);
-				accB = ProcessStripePiece_AVX2(keys2.K09.B, accB, block.S09.B);
-				accA = ProcessStripePiece_AVX2(keys2.K10.A, accA, block.S10.A);
-				accB = ProcessStripePiece_AVX2(keys2.K10.B, accB, block.S10.B);
-				accA = ProcessStripePiece_AVX2(keys2.K11.A, accA, block.S11.A);
-				accB = ProcessStripePiece_AVX2(keys2.K11.B, accB, block.S11.B);
-				accA = ProcessStripePiece_AVX2(keys2.K12.A, accA, block.S12.A);
-				accB = ProcessStripePiece_AVX2(keys2.K12.B, accB, block.S12.B);
-				accA = ProcessStripePiece_AVX2(keys2.K13.A, accA, block.S13.A);
-				accB = ProcessStripePiece_AVX2(keys2.K13.B, accB, block.S13.B);
-				accA = ProcessStripePiece_AVX2(keys2.K14.A, accA, block.S14.A);
-				accB = ProcessStripePiece_AVX2(keys2.K14.B, accB, block.S14.B);
-				accA = ProcessStripePiece_AVX2(keys2.K15.A, accA, block.S15.A);
-				accB = ProcessStripePiece_AVX2(keys2.K15.B, accB, block.S15.B);
-				accA = ScrambleAccumulators_AVX2(accA, scramKeyA);
-				accB = ScrambleAccumulators_AVX2(accB, scramKeyB);
-			}
+			var accVec = MemoryMarshal.Cast<ulong, Vector256<ulong>>(accumulators);
 
+			ProcessFullStripeBlocks_AVX2(blocks, accVec);
 
-			accVec[0] = accA;
-			accVec[1] = accB;
+			var keys = MemoryMarshal.Cast<uint, KeyPair>(kKey);
+			const int VEC256_PER_STRIPE = STRIPE_BYTES / 32;
+
 
 			var dataVec = MemoryMarshal.Cast<byte, Vector256<uint>>(unprocessedData);
 			int remainingStripes = dataVec.Length / VEC256_PER_STRIPE;
@@ -145,8 +99,76 @@ namespace xxHash3
 			return remainingStripes;
 		}
 
+		//Splitting this out for convenience while optimizing
+		private static void ProcessFullStripeBlocks_AVX2(ReadOnlySpan<StripeBlock_AVX2> blocks, Span<Vector256<ulong>> accVec)
+		{
+			var accA = accVec[0];
+			var accB = accVec[1];
+
+			ref var keys2 = ref MemoryMarshal.AsRef<Keys_AVX2>(MemoryMarshal.Cast<uint, byte>(kKey));
+
+			//There are 16 AVX registers. The generated code only needs four of them. So caching a bunch of the loads
+			//here makes use of those registers effectively for free, and reduces the odds of paying penalties
+			//for cache-line crossing loads in the main loop.
+			var K01B05A = keys2.K01.B;
+			var K03B07A = keys2.K03.B;
+			var K05B09A = keys2.K05.B;
+			var K07B11A = keys2.K07.B;
+			var K09B13A = keys2.K09.B;
+			var K11B15A = keys2.K11.B;
+			var K00B04A = keys2.K00.B;
+			var K02B06A = keys2.K02.B;
+			var K12B16A = keys2.K12.B;
+			var K04B08A = keys2.K04.B;
+			var K10B14A = keys2.K10.B;
+
+
+			for (int i = 0; i < blocks.Length; i++)
+			{
+				ref readonly var block = ref blocks[i];
+
+				accA = ProcessStripePiece_AVX2(keys2.K00.A, accA, block.S00.A);
+				accB = ProcessStripePiece_AVX2(K00B04A, accB, block.S00.B);
+				accA = ProcessStripePiece_AVX2(keys2.K01.A, accA, block.S01.A);
+				accB = ProcessStripePiece_AVX2(K01B05A, accB, block.S01.B);
+				accA = ProcessStripePiece_AVX2(keys2.K02.A, accA, block.S02.A);
+				accB = ProcessStripePiece_AVX2(K02B06A, accB, block.S02.B);
+				accA = ProcessStripePiece_AVX2(keys2.K03.A, accA, block.S03.A);
+				accB = ProcessStripePiece_AVX2(K03B07A, accB, block.S03.B);
+				accA = ProcessStripePiece_AVX2(K00B04A, accA, block.S04.A);
+				accB = ProcessStripePiece_AVX2(K04B08A, accB, block.S04.B);
+				accA = ProcessStripePiece_AVX2(K01B05A, accA, block.S05.A);
+				accB = ProcessStripePiece_AVX2(K05B09A, accB, block.S05.B);
+				accA = ProcessStripePiece_AVX2(K02B06A, accA, block.S06.A);
+				accB = ProcessStripePiece_AVX2(keys2.K06.B, accB, block.S06.B);
+				accA = ProcessStripePiece_AVX2(K03B07A, accA, block.S07.A);
+				accB = ProcessStripePiece_AVX2(K07B11A, accB, block.S07.B);
+				accA = ProcessStripePiece_AVX2(K04B08A, accA, block.S08.A);
+				accB = ProcessStripePiece_AVX2(keys2.K08.B, accB, block.S08.B);
+				accA = ProcessStripePiece_AVX2(K05B09A, accA, block.S09.A);
+				accB = ProcessStripePiece_AVX2(K09B13A, accB, block.S09.B);
+				accA = ProcessStripePiece_AVX2(keys2.K10.A, accA, block.S10.A);
+				accB = ProcessStripePiece_AVX2(K10B14A, accB, block.S10.B);
+				accA = ProcessStripePiece_AVX2(K07B11A, accA, block.S11.A);
+				accB = ProcessStripePiece_AVX2(K11B15A, accB, block.S11.B);
+				accA = ProcessStripePiece_AVX2(keys2.K12.A, accA, block.S12.A);
+				accB = ProcessStripePiece_AVX2(K12B16A, accB, block.S12.B);
+				accA = ProcessStripePiece_AVX2(K09B13A, accA, block.S13.A);
+				accB = ProcessStripePiece_AVX2(keys2.K13.B, accB, block.S13.B);
+				accA = ProcessStripePiece_AVX2(K10B14A, accA, block.S14.A);
+				accB = ProcessStripePiece_AVX2(keys2.K14.B, accB, block.S14.B);
+				accA = ProcessStripePiece_AVX2(K11B15A, accA, block.S15.A);
+				accB = ProcessStripePiece_AVX2(keys2.K15.B, accB, block.S15.B);
+				accA = ScrambleAccumulators_AVX2(accA, K12B16A);
+				accB = ScrambleAccumulators_AVX2(accB, keys2.Scramble.B);
+			}
+
+			accVec[0] = accA;
+			accVec[1] = accB;
+		}
+
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		private static Vector256<ulong> ProcessStripePiece_AVX2(Vector256<uint> key, Vector256<ulong> acc, Vector256<uint> data)
+		private static Vector256<ulong> ProcessStripePiece_AVX2(/*in*/ Vector256<uint> key, Vector256<ulong> acc, Vector256<uint> data)
 		{
 			var dk = Avx2.Add(data, key);
 			var shuff = Avx2.Shuffle(dk, 0x31);

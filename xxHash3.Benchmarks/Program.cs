@@ -19,6 +19,14 @@ namespace xxHash3
 	{
 		static void Main()
 		{
+			//var test = new LongKeyTests();
+			//test.ByteLength = 512 * 1024;
+			//test.Setup();
+			//for (int i = 0; i < 327680; i++)
+			//{
+			//	test.XxHash3AVX2();
+			//}
+			//return;
 
 #if RELEASE
 			//var config = DefaultConfig.Instance.With(ConfigOptions.DisableOptimizationsValidator)
@@ -115,7 +123,7 @@ namespace xxHash3
 	{
 		public MyConfig()
 		{
-			var run = Job.InProcess.WithMaxRelativeError(0.05)
+			var run = Job.Default.WithMaxRelativeError(0.05)
 						 .With(new[] { new EnvironmentVariable("COMPlus_TieredCompilation", "0") });
 			Add(run);
 			Add(new ThroughputColumn());
@@ -141,7 +149,7 @@ namespace xxHash3
 		{
 			var run = Job.Dry.With(new[] { new EnvironmentVariable("COMPlus_TieredCompilation", "0") });
 			Add(run);
-			Add(DisassemblyDiagnoser.Create(new DisassemblyDiagnoserConfig(true, false, true, true, 4)));
+			Add(DisassemblyDiagnoser.Create(new DisassemblyDiagnoserConfig(true, false, true, true, 5)));
 			Add(new InliningDiagnoser());
 		}
 	}
@@ -153,7 +161,7 @@ namespace xxHash3
 		private byte[] _bytes;
 
 		//[Params(5, 10, 50, 1000, 1_000_000)]
-		[Params(512 * 1024)]
+		[Params(512 * 1024, 102400)]
 		public int ByteLength { get; set; } = 1_000_000;
 
 		[GlobalSetup]
