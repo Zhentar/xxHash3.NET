@@ -32,6 +32,8 @@ namespace xxHash3
 			0x2b16be58,0x7d47a1fc,0x8ff8b8d1,0x7ad031ce,
 			0x45cb3a8f,0x95160428,0xafd7fbca,0xbb4b407e,
 		};
+
+		private static readonly UnshingledKeys<OctoKey> Keys;
 		const int KEYSET_DEFAULT_SIZE = 48;
 		const int STRIPE_BYTES = 64;
 		const int STRIPE_ELEMENTS = (STRIPE_BYTES / sizeof(uint));
@@ -42,6 +44,43 @@ namespace xxHash3
 		const ulong kKey_1 = 0x23a44bbe_b8fe6c39;
 		const ulong kKey_2 = 0xf721ad1c_7c01812c;
 
+		static xxHash3()
+		{
+			var keys = MemoryMarshal.Cast<uint, KeyPair>(kKey);
+
+			Span<OctoKey> unshingledKeys = stackalloc OctoKey[17];
+
+			for (int i = 0; i < unshingledKeys.Length; i++)
+			{
+				unshingledKeys[i] = MemoryMarshal.Cast<KeyPair, OctoKey>(keys)[0];
+				keys = keys.Slice(1);
+			}
+			Keys = MemoryMarshal.Cast<OctoKey, UnshingledKeys<OctoKey>>(unshingledKeys)[0];
+#if !NETSTANDARD2_0
+			HWIntrinsicsInit_AVX2();
+#endif
+		}
+
+		private struct UnshingledKeys<T>
+		{
+			public readonly T K00;
+			public readonly T K01;
+			public readonly T K02;
+			public readonly T K03;
+			public readonly T K04;
+			public readonly T K05;
+			public readonly T K06;
+			public readonly T K07;
+			public readonly T K08;
+			public readonly T K09;
+			public readonly T K10;
+			public readonly T K11;
+			public readonly T K12;
+			public readonly T K13;
+			public readonly T K14;
+			public readonly T K15;
+			public readonly T Scramble;
+		}
 
 		[StructLayout(LayoutKind.Sequential)]
 		private struct Stripe
@@ -55,19 +94,6 @@ namespace xxHash3
 			public readonly UintPair F;
 			public readonly UintPair G;
 			public readonly UintPair H;
-		}
-
-		[StructLayout(LayoutKind.Sequential)]
-		private unsafe struct StripeBytes
-		{
-			public fixed byte Bytes[STRIPE_BYTES];
-		}
-
-		[StructLayout(LayoutKind.Sequential)]
-		private struct StripeSegment
-		{
-			public readonly UintPair First;
-			public readonly UintPair Second;
 		}
 
 		[StructLayout(LayoutKind.Explicit)]
@@ -302,11 +328,7 @@ namespace xxHash3
 			/* last stripe */
 			if ((data.Length & (Unsafe.SizeOf<Stripe>() - 1)) != 0)
 			{
-#if NETSTANDARD2_0
-				ref readonly Stripe stripe = ref MemoryMarshal.Cast<byte, Stripe>(data.Slice(data.Length - Unsafe.SizeOf<Stripe>()))[0];
-#else
-				ref readonly Stripe stripe = ref MemoryMarshal.AsRef<Stripe>(data.Slice(data.Length - Unsafe.SizeOf<Stripe>()));
-#endif
+				ref readonly Stripe stripe = ref data.Slice(data.Length - Unsafe.SizeOf<Stripe>()).First<Stripe>();
 				AccumulateStripe(acc, stripe , keys.Slice(stripes.Length));
 			}
 		}

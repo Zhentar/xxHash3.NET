@@ -48,5 +48,46 @@ namespace xxHash3
 			return false;
 		}
 
+		public static ref readonly TTo First<TTo>(this ReadOnlySpan<byte> @this) where TTo : struct => ref @this.First<byte, TTo>();
+
+		public static ref readonly TTo First<TFrom, TTo>(this ReadOnlySpan<TFrom> @this) where TTo : struct where TFrom : struct
+		{
+#if NETSTANDARD2_0
+			return ref MemoryMarshal.Cast<TFrom, TTo>(@this)[0];
+#else
+			//TODO: is this version actually any faster/better at all?
+			return ref MemoryMarshal.AsRef<TTo>(MemoryMarshal.AsBytes(@this));
+#endif
+		}
+
+	}
+
+	public static class Safeish
+	{
+		public static ref readonly TTo As<TFrom, TTo>(in TFrom from) where TTo : struct where TFrom : struct
+		{
+			if(Unsafe.SizeOf<TFrom>() < Unsafe.SizeOf<TTo>()) { throw new InvalidCastException(); }
+			return ref Unsafe.As<TFrom, TTo>(ref Unsafe.AsRef(from));
+		}
+
+		public static ReadOnlySpan<TTo> AsSpan<TFrom, TTo>(in TFrom from) where TTo : struct where TFrom : struct
+		{
+#if NETSTANDARD2_0
+			var asSpan = CreateReadOnlySpan(ref Unsafe.AsRef(from));
+#else
+			var asSpan = MemoryMarshal.CreateReadOnlySpan(ref Unsafe.AsRef(from), 1);
+#endif
+			return MemoryMarshal.Cast<TFrom, TTo>(asSpan);
+		}
+
+#if NETSTANDARD2_0
+		private static unsafe ReadOnlySpan<T> CreateReadOnlySpan<T>(ref T from) where T : struct
+		{
+			void* ptr = Unsafe.AsPointer(ref from);
+			return new ReadOnlySpan<T>(ptr, 1);
+		}
+#endif
+
+
 	}
 }

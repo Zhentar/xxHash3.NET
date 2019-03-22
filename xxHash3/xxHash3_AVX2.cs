@@ -8,32 +8,15 @@ namespace xxHash3
 {
 	public partial class xxHash3
 	{
-		private struct Vec256Pair<T> where T : struct
+		private static void HWIntrinsicsInit_AVX2()
 		{
-			public Vector256<T> A;
-			public Vector256<T> B;
+
 		}
 
-		[StructLayout(LayoutKind.Explicit)]
-		private readonly struct Keys_AVX2
+		private readonly struct Vec256Pair<T> where T : unmanaged
 		{
-			[FieldOffset(0)]   public readonly Vec256Pair<uint> K00;
-			[FieldOffset(8)]   public readonly Vec256Pair<uint> K01;
-			[FieldOffset(16)]  public readonly Vec256Pair<uint> K02;
-			[FieldOffset(24)]  public readonly Vec256Pair<uint> K03;
-			[FieldOffset(32)]  public readonly Vec256Pair<uint> K04;
-			[FieldOffset(40)]  public readonly Vec256Pair<uint> K05;
-			[FieldOffset(48)]  public readonly Vec256Pair<uint> K06;
-			[FieldOffset(56)]  public readonly Vec256Pair<uint> K07;
-			[FieldOffset(64)]  public readonly Vec256Pair<uint> K08;
-			[FieldOffset(72)]  public readonly Vec256Pair<uint> K09;
-			[FieldOffset(80)]  public readonly Vec256Pair<uint> K10;
-			[FieldOffset(88)]  public readonly Vec256Pair<uint> K11;
-			[FieldOffset(96)]  public readonly Vec256Pair<uint> K12;
-			[FieldOffset(104)] public readonly Vec256Pair<uint> K13;
-			[FieldOffset(112)] public readonly Vec256Pair<uint> K14;
-			[FieldOffset(120)] public readonly Vec256Pair<uint> K15;
-			[FieldOffset(128)] public readonly Vec256Pair<uint> Scramble;
+			public readonly Vector256<T> A;
+			public readonly Vector256<T> B;
 		}
 
 		[StructLayout(LayoutKind.Sequential)]
@@ -57,7 +40,7 @@ namespace xxHash3
 			public readonly Vec256Pair<uint> S15;
 		}
 
-		private static int AccumulateStripes_AVX2(in ReadOnlySpan<byte> userData, in Span<ulong> accumulators)
+		private static void AccumulateStripes_AVX2(in ReadOnlySpan<byte> userData, in Span<ulong> accumulators)
 		{
 			ref var accPair = ref MemoryMarshal.AsRef<Vec256Pair<ulong>>(MemoryMarshal.AsBytes(accumulators));
 
@@ -66,46 +49,40 @@ namespace xxHash3
 
 			var accVec = MemoryMarshal.Cast<ulong, Vector256<ulong>>(accumulators);
 
-			ProcessFullStripeBlocks_AVX2(blocks, accVec);
-
-			var keys = MemoryMarshal.Cast<uint, KeyPair>(kKey);
-			const int VEC256_PER_STRIPE = STRIPE_BYTES / 32;
+			ref readonly var keys2 = ref Safeish.As<UnshingledKeys<OctoKey>, UnshingledKeys<Vec256Pair<uint>>>(Keys);
+			ProcessFullStripeBlocks_AVX2(blocks, accVec, keys2);
 
 
-			var dataVec = MemoryMarshal.Cast<byte, Vector256<uint>>(unprocessedData);
-			int remainingStripes = dataVec.Length / VEC256_PER_STRIPE;
 
+			var dataVec = MemoryMarshal.Cast<byte, Vec256Pair<uint>>(unprocessedData);
+			int remainingStripes = dataVec.Length;
 			if ((userData.Length & (Unsafe.SizeOf<Stripe>() - 1)) != 0) { remainingStripes++; }
 
-			var lastStripeVec = MemoryMarshal.Cast<byte, Vector256<uint>>(userData.Slice(userData.Length - Unsafe.SizeOf<Stripe>()));
+			if(remainingStripes == 0) { return; }
 
-			/* last partial block */
-			for (int i = 0; i < VEC256_PER_STRIPE; i++)
+			var accA = accVec[0];
+			var accB = accVec[1];
+
+			var lastStripeVec = MemoryMarshal.Cast<byte, Vec256Pair<uint>>(userData.Slice(userData.Length - Unsafe.SizeOf<Stripe>()))[0];
+			var keysSpan = Safeish.AsSpan<UnshingledKeys<Vec256Pair<uint>>, Vec256Pair<uint>>(keys2);
+			int j = 0;
+			for (; j < remainingStripes - 1; j++)
 			{
-				var acc = accVec[i];
-				for (int j = 0; j < remainingStripes; j++)
-				{
-					var key = Unsafe.As<KeyPair, Vector256<uint>>(ref keys[i * (Unsafe.SizeOf<Vector256<uint>>() / Unsafe.SizeOf<KeyPair>()) + j]);
-					var data = j == remainingStripes - 1 ? lastStripeVec[i] : dataVec[i + j * VEC256_PER_STRIPE];
-					var dk = Avx2.Add(data, key);
-					var shuff = Avx2.Shuffle(dk, 0x31);
-					Vector256<ulong> res = Avx2.Multiply(dk, shuff);
-					Vector256<ulong> add = Avx2.Add(data.AsUInt64(), acc);
-					acc = Avx2.Add(res, add);
-				}
-				accVec[i] = acc;
+				ref readonly var data = ref dataVec[j];
+				accA = ProcessStripePiece_AVX2(keysSpan[j].A, accA, data.A);
+				accB = ProcessStripePiece_AVX2(keysSpan[j].B, accB, data.B);
 			}
+			accVec[0] = ProcessStripePiece_AVX2(keysSpan[j].A, accA, lastStripeVec.A);
+			accVec[1] = ProcessStripePiece_AVX2(keysSpan[j].B, accB, lastStripeVec.B);
 
-			return remainingStripes;
 		}
 
 		//Splitting this out for convenience while optimizing
-		private static void ProcessFullStripeBlocks_AVX2(ReadOnlySpan<StripeBlock_AVX2> blocks, Span<Vector256<ulong>> accVec)
+		private static void ProcessFullStripeBlocks_AVX2(in ReadOnlySpan<StripeBlock_AVX2> blocks,in Span<Vector256<ulong>> accVec, in UnshingledKeys<Vec256Pair<uint>> keys2)
 		{
 			var accA = accVec[0];
 			var accB = accVec[1];
 
-			ref var keys2 = ref MemoryMarshal.AsRef<Keys_AVX2>(MemoryMarshal.Cast<uint, byte>(kKey));
 
 			//There are 16 AVX registers. The generated code only needs four of them. So caching a bunch of the loads
 			//here makes use of those registers effectively for free, and reduces the odds of paying penalties
