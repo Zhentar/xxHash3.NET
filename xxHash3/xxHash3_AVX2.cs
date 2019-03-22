@@ -78,8 +78,9 @@ namespace xxHash3
 		}
 
 		//Splitting this out for convenience while optimizing
-		private static void ProcessFullStripeBlocks_AVX2(in ReadOnlySpan<StripeBlock_AVX2> blocks,in Span<Vector256<ulong>> accVec, in UnshingledKeys<Vec256Pair<uint>> keys2)
+		private static void ProcessFullStripeBlocks_AVX2(/*in*/ ReadOnlySpan<StripeBlock_AVX2> blocks,/*in */Span<Vector256<ulong>> accVec, in UnshingledKeys<Vec256Pair<uint>> keys2)
 		{
+			if( 2u < (uint)accVec.Length) { return; } //Conceptually this should be a throw but the goal here it to satisfy the JIT regarding bounds checks (doesn't seem like it's working, though)
 			var accA = accVec[0];
 			var accB = accVec[1];
 
