@@ -31,6 +31,8 @@ namespace xxHash3
 		};
 
 		private static readonly UnshingledKeys<OctoKey> Keys;
+		private static readonly KeyPair64Quad Keys64_A;
+		private static readonly KeyPair64Quad Keys64_B;
 
 		const uint kKey_1_left = 0xb8fe6c39;
 		const uint kKey_1_right = 0x23a44bbe;
@@ -49,6 +51,9 @@ namespace xxHash3
 				keys = keys.Slice(1);
 			}
 			Keys = MemoryMarshal.Cast<OctoKey, UnshingledKeys<OctoKey>>(unshingledKeys)[0];
+
+			Keys64_A = new KeyPair64Quad(Keys.K00);
+			Keys64_B = new KeyPair64Quad(Keys.K01);
 		}
 
 
@@ -62,7 +67,7 @@ namespace xxHash3
 
 		private static ulong SixteenToOneTwentyEight(ReadOnlySpan<byte> data, ulong seed)
 		{
-			ref readonly var key = ref Keys.K00;
+			ref readonly var key = ref Keys64_A;
 			ulong acc = PRIME64_1 * ((uint)data.Length + seed);
 
 			var fromTheFront = MemoryMarshal.Cast<byte, UserDataUlongPair>(data);
@@ -70,24 +75,24 @@ namespace xxHash3
 
 			if (fromTheFront.Length > 4)
 			{
-				ref readonly var key2 = ref Keys.K01;
+				ref readonly var key2 = ref Keys64_B;
 				if (fromTheFront.Length > 6)
 				{
-					acc += MixSixteenBytes(fromTheFront[3], key2.E, key2.F);
-					acc += MixSixteenBytes(fromTheBack[fromTheBack.Length - 4], key2.G, key2.H);
+					acc += MixSixteenBytes(fromTheFront[3], key2.C);
+					acc += MixSixteenBytes(fromTheBack[fromTheBack.Length - 4], key2.D);
 				}
-				acc += MixSixteenBytes(fromTheFront[2], key2.A, key2.B);
-				acc += MixSixteenBytes(fromTheBack[fromTheBack.Length - 3], key2.C, key2.D);
+				acc += MixSixteenBytes(fromTheFront[2], key2.A);
+				acc += MixSixteenBytes(fromTheBack[fromTheBack.Length - 3], key2.B);
 			}
 
 			if (fromTheFront.Length > 2)
 			{
-				acc += MixSixteenBytes(fromTheFront[1], key.E, key.F);
-				acc += MixSixteenBytes(fromTheBack[fromTheBack.Length - 2], key.G, key.H);
+				acc += MixSixteenBytes(fromTheFront[1], key.C);
+				acc += MixSixteenBytes(fromTheBack[fromTheBack.Length - 2], key.D);
 			}
 
-			acc += MixSixteenBytes(fromTheFront[0], key.A, key.B);
-			acc += MixSixteenBytes(fromTheBack[fromTheBack.Length - 1], key.C, key.D);
+			acc += MixSixteenBytes(fromTheFront[0], key.A);
+			acc += MixSixteenBytes(fromTheBack[fromTheBack.Length - 1], key.B);
 
 			return Avalanche(acc);
 		}
@@ -140,9 +145,9 @@ namespace xxHash3
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		private static ulong MixSixteenBytes(UserDataUlongPair data, KeyPair left, KeyPair right)
+		private static ulong MixSixteenBytes(UserDataUlongPair data, KeyPair64 key)
 		{
-			return MultiplyAdd64(data.Left ^ left.Key64, data.Right ^ right.Key64);
+			return MultiplyAdd64(data.Left ^ key.Left, data.Right ^ key.Right);
 		}
 
 		private static void AccumulateStripe(ref OctoAccumulator acc, in Stripe data, in OctoKey theKeys)
@@ -273,10 +278,10 @@ namespace xxHash3
 			/* converge into final hash */
 			ref readonly var key = ref Keys.K00;
 			ulong result64 = (ulong)data.Length * PRIME64_1;
-			result64 += MultiplyAdd64(acc2.A ^ key.A.Key64, acc2.B ^ key.B.Key64);
-			result64 += MultiplyAdd64(acc2.C ^ key.C.Key64, acc2.D ^ key.D.Key64);
-			result64 += MultiplyAdd64(acc2.E ^ key.E.Key64, acc2.F ^ key.F.Key64);
-			result64 += MultiplyAdd64(acc2.G ^ key.G.Key64, acc2.H ^ key.H.Key64);
+			result64 += MultiplyAdd64(acc2.A ^ Keys64_A.A.Left, acc2.B ^ Keys64_A.A.Right);
+			result64 += MultiplyAdd64(acc2.C ^ Keys64_A.B.Left, acc2.D ^ Keys64_A.B.Right);
+			result64 += MultiplyAdd64(acc2.E ^ Keys64_A.C.Left, acc2.F ^ Keys64_A.C.Right);
+			result64 += MultiplyAdd64(acc2.G ^ Keys64_A.D.Left, acc2.H ^ Keys64_A.D.Right);
 			return Avalanche(result64);
 		}
 

@@ -43,23 +43,13 @@ namespace xxHash3
 			public readonly UintPair H;
 		}
 
-		[StructLayout(LayoutKind.Explicit)]
+		[StructLayout(LayoutKind.Sequential)]
 		private readonly struct UintPair
 		{
-			[FieldOffset(0)]
 			private readonly uint _left;
-			[FieldOffset(4)]
 			private readonly uint _right;
-			[FieldOffset(0)]
-			private readonly ulong _value64;
 			public uint Left => _left.AsLittleEndian();
 			public uint Right => _right.AsLittleEndian();
-
-			public ulong Value64
-			{
-				[MethodImpl(MethodImplOptions.AggressiveInlining)]
-				get => BitConverter.IsLittleEndian ? _value64 : Left + ((ulong)Right << 32);
-			}
 		}
 
 		[StructLayout(LayoutKind.Sequential)]
@@ -72,23 +62,36 @@ namespace xxHash3
 		}
 
 
-		[StructLayout(LayoutKind.Explicit)]
+		[StructLayout(LayoutKind.Sequential)]
 		private readonly struct KeyPair
 		{
-			[FieldOffset(0)]
 			public readonly uint Left;
-			[FieldOffset(4)]
 			public readonly uint Right;
-			[FieldOffset(0)]
-			private readonly ulong _key64;
+		}
 
-			public ulong Key64
+
+		[StructLayout(LayoutKind.Sequential)]
+		private readonly struct KeyPair64
+		{
+			public readonly ulong Left;
+			public readonly ulong Right;
+
+			public KeyPair64(KeyPair left, KeyPair right)
 			{
-				[MethodImpl(MethodImplOptions.AggressiveInlining)]
-				get => BitConverter.IsLittleEndian ? _key64 : Left + ((ulong)Right << 32);
+				Left = left.Left + ((ulong)left.Right << 32);
+				Right = right.Left + ((ulong)right.Right << 32);
 			}
+		}
 
-			public KeyPair(uint left, uint right) => (_key64, Left, Right) = (0ul, left, right);
+		[StructLayout(LayoutKind.Sequential)]
+		private readonly struct KeyPair64Quad
+		{
+			public readonly KeyPair64 A;
+			public readonly KeyPair64 B;
+			public readonly KeyPair64 C;
+			public readonly KeyPair64 D;
+
+			public KeyPair64Quad(in OctoKey key) => (A, B, C, D) = (new KeyPair64(key.A, key.B), new KeyPair64(key.C, key.D), new KeyPair64(key.E, key.F), new KeyPair64(key.G, key.H));
 		}
 
 		[StructLayout(LayoutKind.Sequential)]
