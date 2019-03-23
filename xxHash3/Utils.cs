@@ -100,6 +100,13 @@ namespace xxHash3
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static ref TTo AsMut<TFrom, TTo>(ref TFrom from) where TTo : struct where TFrom : struct
+		{
+			if (Unsafe.SizeOf<TFrom>() < Unsafe.SizeOf<TTo>()) { throw new InvalidCastException(); }
+			return ref Unsafe.As<TFrom, TTo>(ref from);
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static ReadOnlySpan<TTo> AsSpan<TFrom, TTo>(in TFrom from) where TTo : struct where TFrom : struct
 		{
 #if NETSTANDARD2_0
@@ -110,7 +117,24 @@ namespace xxHash3
 			return MemoryMarshal.Cast<TFrom, TTo>(asSpan);
 		}
 
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static Span<TTo> AsMutableSpan<TFrom, TTo>(ref TFrom from) where TTo : struct where TFrom : struct
+		{
 #if NETSTANDARD2_0
+			var asSpan = CreateSpan(ref Unsafe.AsRef(from));
+#else
+			var asSpan = MemoryMarshal.CreateSpan(ref from, 1);
+#endif
+			return MemoryMarshal.Cast<TFrom, TTo>(asSpan);
+		}
+
+#if NETSTANDARD2_0
+		private static unsafe Span<T> CreateSpan<T>(ref T from) where T : struct
+		{
+			void* ptr = Unsafe.AsPointer(ref from);
+			return new Span<T>(ptr, 1);
+		}
+		
 		private static unsafe ReadOnlySpan<T> CreateReadOnlySpan<T>(ref T from) where T : struct
 		{
 			void* ptr = Unsafe.AsPointer(ref from);

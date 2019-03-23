@@ -20,11 +20,11 @@ namespace xxHash3
 			public Vector256<ulong> B;
 		}
 
-		private static void LongSequenceHash_AVX2(ReadOnlySpan<byte> userData, Span<ulong> accumulators)
+		private static void LongSequenceHash_AVX2(ref OctoAccumulator accumulator, ReadOnlySpan<byte> userData)
 		{
 			var unprocessedData = userData;
 			var blocks = unprocessedData.PopAll<StripeBlock<Vec256Pair<uint>>>();
-			ref var acc = ref MemoryMarshal.AsRef<MutableVec256Pair>(MemoryMarshal.AsBytes(accumulators));
+			ref var acc = ref Safeish.AsMut<OctoAccumulator, MutableVec256Pair>(ref accumulator);
 
 			ProcessFullStripeBlocks_AVX2(blocks, ref acc);
 

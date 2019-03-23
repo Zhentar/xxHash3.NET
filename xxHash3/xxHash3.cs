@@ -3,8 +3,6 @@ using System.Runtime.InteropServices;
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 
-
-
 namespace xxHash3
 {
 #pragma warning disable IDE1006 // Naming Styles
@@ -26,7 +24,6 @@ namespace xxHash3
 			0x71644897,0xa20df94e,0x3819ef46,0xa9deacd8,
 			0xa8fa763f,0xe39c343f,0xf9dcbbc7,0xc70b4f1d,
 			0x8a51e04b,0xcdb45931,0xc89f7ec9,0xd9787364,
-			//The following key values are optional
 			0xeac5ac83,0x34d3ebc3,0xc581a0ff,0xfa1363eb,
 			0x170ddd51,0xb7f0da49,0xd3165526,0x29d4689e,
 			0x2b16be58,0x7d47a1fc,0x8ff8b8d1,0x7ad031ce,
@@ -34,10 +31,6 @@ namespace xxHash3
 		};
 
 		private static readonly UnshingledKeys<OctoKey> Keys;
-		const int KEYSET_DEFAULT_SIZE = 48;
-		const int STRIPE_BYTES = 64;
-		const int STRIPE_ELEMENTS = (STRIPE_BYTES / sizeof(uint));
-		const int STRIPES_PER_BLOCK = (KEYSET_DEFAULT_SIZE - STRIPE_ELEMENTS) / 2;
 
 		const uint kKey_1_left = 0xb8fe6c39;
 		const uint kKey_1_right = 0x23a44bbe;
@@ -144,7 +137,6 @@ namespace xxHash3
 		[StructLayout(LayoutKind.Sequential)]
 		private struct OctoKey
 		{
-			//Unfortunately, fixed can't be used with user defined structs, so we get this instead...
 			public readonly KeyPair A;
 			public readonly KeyPair B;
 			public readonly KeyPair C;
@@ -154,6 +146,20 @@ namespace xxHash3
 			public readonly KeyPair G;
 			public readonly KeyPair H;
 		}
+
+		[StructLayout(LayoutKind.Sequential)]
+		private struct OctoAccumulator
+		{
+			public ulong A;
+			public ulong B;
+			public ulong C;
+			public ulong D;
+			public ulong E;
+			public ulong F;
+			public ulong G;
+			public ulong H;
+		}
+
 
 		[StructLayout(LayoutKind.Sequential)]
 		private struct StripeBlock<T> where T : struct
@@ -269,33 +275,34 @@ namespace xxHash3
 			return MultiplyAdd64(data.Left ^ left.Key64, data.Right ^ right.Key64);
 		}
 
-		private static void AccumulateStripe(Span<ulong> acc, in Stripe data, in OctoKey theKeys)
+		private static void AccumulateStripe(ref OctoAccumulator acc, in Stripe data, in OctoKey theKeys)
 		{
 			//Hand unrolled...
-			AccumulateOnePair(ref Unsafe.Add(ref MemoryMarshal.GetReference(acc), 0), data.A, theKeys.A);
-			AccumulateOnePair(ref Unsafe.Add(ref MemoryMarshal.GetReference(acc), 1), data.B, theKeys.B);
-			AccumulateOnePair(ref Unsafe.Add(ref MemoryMarshal.GetReference(acc), 2), data.C, theKeys.C);
-			AccumulateOnePair(ref Unsafe.Add(ref MemoryMarshal.GetReference(acc), 3), data.D, theKeys.D);
-			AccumulateOnePair(ref Unsafe.Add(ref MemoryMarshal.GetReference(acc), 4), data.E, theKeys.E);
-			AccumulateOnePair(ref Unsafe.Add(ref MemoryMarshal.GetReference(acc), 5), data.F, theKeys.F);
-			AccumulateOnePair(ref Unsafe.Add(ref MemoryMarshal.GetReference(acc), 6), data.G, theKeys.G);
-			AccumulateOnePair(ref Unsafe.Add(ref MemoryMarshal.GetReference(acc), 7), data.H, theKeys.H);
+			acc.A = AccumulateOnePair(acc.A, data.A, theKeys.A);
+			acc.B = AccumulateOnePair(acc.B, data.B, theKeys.B);
+			acc.C = AccumulateOnePair(acc.C, data.C, theKeys.C);
+			acc.D = AccumulateOnePair(acc.D, data.D, theKeys.D);
+			acc.E = AccumulateOnePair(acc.E, data.E, theKeys.E);
+			acc.F = AccumulateOnePair(acc.F, data.F, theKeys.F);
+			acc.G = AccumulateOnePair(acc.G, data.G, theKeys.G);
+			acc.H = AccumulateOnePair(acc.H, data.H, theKeys.H);
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		private static void AccumulateOnePair(ref ulong acc, UintPair value, KeyPair key)
+		private static ulong AccumulateOnePair(ulong acc, UintPair value, KeyPair key)
 		{
 			var dataLeft = value.Left;
 			var dataRight = value.Right;
 			var mul = Multiply32to64(dataLeft + key.Left, dataRight + key.Right);
 			acc += mul + dataLeft + ((ulong)dataRight << 32);
+			return acc;
 		}
 
-
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		private static void ScrambleAccumulators(Span<ulong> acc)
+		private static void ScrambleAccumulators_Scalar(ref OctoAccumulator accumulator)
 		{
 			var keys = Safeish.AsSpan<OctoKey, KeyPair>(Keys.Scramble);
+			var acc = Safeish.AsMutableSpan<OctoAccumulator, ulong>(ref accumulator);
 			for (int i = 0; i < acc.Length; i++)
 			{
 				acc[i] ^= acc[i] >> 47;
@@ -305,77 +312,101 @@ namespace xxHash3
 			}
 		}
 
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		private static void AccumulateStripeBlock(Span<ulong> acc, ReadOnlySpan<Stripe> stripes)
+		private static void AccumulateStripeBlocks_Scalar(ref OctoAccumulator acc, ReadOnlySpan<StripeBlock<Stripe>> blocks)
 		{
-			var keysSpan = Safeish.AsSpan<UnshingledKeys<OctoKey>, OctoKey>(Keys);
-			for (int i = 0; i < stripes.Length; i++)
+			ref readonly var keys = ref Keys;
+
+			for (int i = 0; i < blocks.Length; i++)
 			{
-				AccumulateStripe(acc, stripes[i], keysSpan[i]);
+				ref readonly var stripes = ref blocks[i];
+				AccumulateStripe(ref acc, stripes.S00, keys.K00);
+				AccumulateStripe(ref acc, stripes.S01, keys.K01);
+				AccumulateStripe(ref acc, stripes.S02, keys.K02);
+				AccumulateStripe(ref acc, stripes.S03, keys.K03);
+				AccumulateStripe(ref acc, stripes.S04, keys.K04);
+				AccumulateStripe(ref acc, stripes.S05, keys.K05);
+				AccumulateStripe(ref acc, stripes.S06, keys.K06);
+				AccumulateStripe(ref acc, stripes.S07, keys.K07);
+				AccumulateStripe(ref acc, stripes.S08, keys.K08);
+				AccumulateStripe(ref acc, stripes.S09, keys.K09);
+				AccumulateStripe(ref acc, stripes.S10, keys.K10);
+				AccumulateStripe(ref acc, stripes.S11, keys.K11);
+				AccumulateStripe(ref acc, stripes.S12, keys.K12);
+				AccumulateStripe(ref acc, stripes.S13, keys.K13);
+				AccumulateStripe(ref acc, stripes.S14, keys.K14);
+				AccumulateStripe(ref acc, stripes.S15, keys.K15);
+				ScrambleAccumulators_Scalar(ref acc);
 			}
+
 		}
 
 		public static bool UseAvx2;
 		public static bool UseSse2;
 
-		private static void LongSequenceHashInternal(Span<ulong> acc, ReadOnlySpan<byte> data)
+		private static void LongSequenceHash_Scalar(ref OctoAccumulator acc, ReadOnlySpan<byte> data)
 		{
-			var keys = MemoryMarshal.Cast<uint, KeyPair>(kKey);
-			var stripes = MemoryMarshal.Cast<byte, Stripe>(data);
+			var unprocessedData = data;
+			ReadOnlySpan<StripeBlock<Stripe>> blocks = unprocessedData.PopAll<StripeBlock<Stripe>>();
+
+			AccumulateStripeBlocks_Scalar(ref acc, blocks);
+
+			if (unprocessedData.Length == 0) { goto Exit; /*Goto dedupes function epilog*/ }
+
+			var keysSpan = Safeish.AsSpan<UnshingledKeys<OctoKey>, OctoKey>(Keys);
+			var stripes = MemoryMarshal.Cast<byte, Stripe>(unprocessedData);
 				
-			while (stripes.Length >= STRIPES_PER_BLOCK)
-			{
-				var blockStripes = stripes.Slice(0, STRIPES_PER_BLOCK);
-				stripes = stripes.Slice(STRIPES_PER_BLOCK);
-				AccumulateStripeBlock(acc, blockStripes);
-				ScrambleAccumulators(acc);
-			}
 
 			/* last partial block */
-			AccumulateStripeBlock(acc, stripes);
-
+			for (int i = 0; i < stripes.Length; i++)
+			{
+				AccumulateStripe(ref acc, stripes[i], keysSpan[stripes.Length]);
+			}
 			/* last stripe */
 			if ((data.Length & (Unsafe.SizeOf<Stripe>() - 1)) != 0)
 			{
-				var keysSpan = Safeish.AsSpan<UnshingledKeys<OctoKey>, OctoKey>(Keys);
 				ref readonly Stripe stripe = ref data.Last<Stripe>();
-				AccumulateStripe(acc, stripe , keysSpan[stripes.Length]);
+				AccumulateStripe(ref acc, stripe , keysSpan[stripes.Length]);
 			}
+		Exit:
+			return;
 		}
 
 		private static ulong HashLongSequence64(ReadOnlySpan<byte> data, ulong seed)
 		{
-			Span<ulong> acc = stackalloc ulong[8];
-			acc[0] = seed;
-			acc[1] = PRIME64_1;
-			acc[2] = PRIME64_2;
-			acc[3] = PRIME64_3;
-			acc[4] = PRIME64_4;
-			acc[5] = PRIME64_5;
-			acc[6] = seed;
-			acc[7] = 0; //already zeroed, but allows for stripping localsinit if one so desires
+			var acc2 = new OctoAccumulator
+			{
+				A = seed,
+				B = PRIME64_1,
+				C = PRIME64_2,
+				D = PRIME64_3,
+				E = PRIME64_4,
+				F = PRIME64_5,
+				G = seed,
+				H = 0
+			};
+
 
 #if NETCOREAPP3_0
 			if (System.Runtime.Intrinsics.X86.Avx2.IsSupported && UseAvx2)
 			{
-				LongSequenceHash_AVX2(data, acc);
+				LongSequenceHash_AVX2(ref acc2, data);
 			}
 			else if (System.Runtime.Intrinsics.X86.Sse2.IsSupported && UseSse2)
 			{
-				LongSequenceHash_SSE2(data, acc);
+				LongSequenceHash_SSE2(ref acc2, data);
 			}
 			else
 #endif
 			{
-				LongSequenceHashInternal(acc, data);
+				LongSequenceHash_Scalar(ref acc2, data);
 			}
 			/* converge into final hash */
 			ref readonly var key = ref Keys.K00;
 			ulong result64 = (ulong)data.Length * PRIME64_1;
-			result64 += MultiplyAdd64(acc[0] ^ key.A.Key64, acc[1] ^ key.B.Key64);
-			result64 += MultiplyAdd64(acc[2] ^ key.C.Key64, acc[3] ^ key.D.Key64);
-			result64 += MultiplyAdd64(acc[4] ^ key.E.Key64, acc[5] ^ key.F.Key64);
-			result64 += MultiplyAdd64(acc[6] ^ key.G.Key64, acc[7] ^ key.H.Key64);
+			result64 += MultiplyAdd64(acc2.A ^ key.A.Key64, acc2.B ^ key.B.Key64);
+			result64 += MultiplyAdd64(acc2.C ^ key.C.Key64, acc2.D ^ key.D.Key64);
+			result64 += MultiplyAdd64(acc2.E ^ key.E.Key64, acc2.F ^ key.F.Key64);
+			result64 += MultiplyAdd64(acc2.G ^ key.G.Key64, acc2.H ^ key.H.Key64);
 			return Avalanche(result64);
 		}
 
