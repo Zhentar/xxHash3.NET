@@ -20,12 +20,13 @@ namespace xxHash3
 	{
 		static void Main()
 		{
+			//For VTune profiling:
 			//var test = new LongKeyTests();
 			//test.ByteLength = 128 * 1024;
 			//test.Setup();
-			//for (int i = 0; i < 3276800; i++)
+			//for (int i = 0; i < 327680; i++)
 			//{
-			//	test.XxHash3AVX2();
+			//	test.XxHash3();
 			//}
 			//return;
 
@@ -180,11 +181,11 @@ namespace xxHash3
 			return bytes;
 		}
 
-		//[Benchmark]
-		public ulong XxHash64() => xxHash64.Hash(_bytes);
+		[Benchmark]
+		public ulong xxHash64_Scalar() => xxHash64.Hash(_bytes);
 
 		[Benchmark]
-		public ulong XxHash3AVX2()
+		public ulong xxHash3_AVX2()
 		{
 			xxHash3.UseAvx2 = true;
 			var result = xxHash3.Hash64(_bytes);
@@ -192,8 +193,17 @@ namespace xxHash3
 			return result;
 		}
 
-		//[Benchmark]
-		public ulong XxHash3() => xxHash3.Hash64(_bytes);
+		[Benchmark]
+		public ulong xxHash3_SSE2()
+		{
+			xxHash3.UseSse2 = true;
+			var result = xxHash3.Hash64(_bytes);
+			xxHash3.UseSse2 = false;
+			return result;
+		}
+
+		[Benchmark]
+		public ulong xxHash3_Scalar() => xxHash3.Hash64(_bytes);
 	}
 
 	[SimpleJob]
