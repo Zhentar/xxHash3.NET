@@ -56,9 +56,6 @@ namespace xxHash3
 				keys = keys.Slice(1);
 			}
 			Keys = MemoryMarshal.Cast<OctoKey, UnshingledKeys<OctoKey>>(unshingledKeys)[0];
-#if !NETSTANDARD2_0
-			HWIntrinsicsInit_AVX2();
-#endif
 		}
 
 		private struct UnshingledKeys<T>
@@ -115,6 +112,15 @@ namespace xxHash3
 			}
 		}
 
+		[StructLayout(LayoutKind.Sequential)]
+		private readonly struct UserDataUlongPair
+		{
+			private readonly ulong _left;
+			private readonly ulong _right;
+			public ulong Left => _left.AsLittleEndian();
+			public ulong Right => _right.AsLittleEndian();
+		}
+
 
 		[StructLayout(LayoutKind.Explicit)]
 		private readonly struct KeyPair
@@ -134,14 +140,7 @@ namespace xxHash3
 
 			public KeyPair(uint left, uint right) => (_key64, Left, Right) = (0ul, left, right);
 		}
-
-		[StructLayout(LayoutKind.Sequential)]
-		private readonly struct KeyPairPair
-		{
-			public readonly KeyPair First;
-			public readonly KeyPair Second;
-		}
-
+		
 		[StructLayout(LayoutKind.Sequential)]
 		private struct OctoKey
 		{
@@ -156,41 +155,69 @@ namespace xxHash3
 			public readonly KeyPair H;
 		}
 
-		public static ulong Hash64(in ReadOnlySpan<byte> data, ulong seed = 0)
+		[StructLayout(LayoutKind.Sequential)]
+		private struct StripeBlock<T> where T : struct
 		{
-			int len = data.Length;
-			if (len <= 16) { return ZeroToSixteenBytes(data, seed); }
+			public readonly T S00;
+			public readonly T S01;
+			public readonly T S02;
+			public readonly T S03;
+			public readonly T S04;
+			public readonly T S05;
+			public readonly T S06;
+			public readonly T S07;
+			public readonly T S08;
+			public readonly T S09;
+			public readonly T S10;
+			public readonly T S11;
+			public readonly T S12;
+			public readonly T S13;
+			public readonly T S14;
+			public readonly T S15;
+		}
 
-			var keys = MemoryMarshal.Cast<uint, KeyPairPair>(kKey);
+
+		public static ulong Hash64(ReadOnlySpan<byte> data, ulong seed = 0)
+		{
+			if (data.Length <= 16) { return ZeroToSixteenBytes(data, seed); }
+			if (data.Length > 128) { return HashLongSequence64(data, seed); }
+			return SixteenToOneTwentyEight(data, seed);
+		}
+
+		private static ulong SixteenToOneTwentyEight(ReadOnlySpan<byte> data, ulong seed)
+		{
+			ref readonly var key = ref Keys.K00;
 			ulong acc = PRIME64_1 * ((uint)data.Length + seed);
-			if (len > 32)
+
+			var fromTheFront = MemoryMarshal.Cast<byte, UserDataUlongPair>(data);
+			var fromTheBack = MemoryMarshal.Cast<byte, UserDataUlongPair>(data.Slice(data.Length & 0xF));
+
+			if (fromTheFront.Length > 4)
 			{
-				if (len > 64)
+				ref readonly var key2 = ref Keys.K01;
+				if (fromTheFront.Length > 6)
 				{
-					if (len > 96)
-					{
-						if (len > 128) return HashLongSequence64(data, seed);
-
-						acc += MixSixteenBytes(data.Slice(48), keys[6]);
-						acc += MixSixteenBytes(data.Slice(len - 64), keys[7]);
-					}
-
-					acc += MixSixteenBytes(data.Slice(32), keys[4]);
-					acc += MixSixteenBytes(data.Slice(len - 48), keys[5]);
+					acc += MixSixteenBytes(fromTheFront[3], key2.E, key2.F);
+					acc += MixSixteenBytes(fromTheBack[fromTheBack.Length - 4], key2.G, key2.H);
 				}
-
-				acc += MixSixteenBytes(data.Slice(16), keys[2]);
-				acc += MixSixteenBytes(data.Slice(len - 32), keys[3]);
-
+				acc += MixSixteenBytes(fromTheFront[2], key2.A, key2.B);
+				acc += MixSixteenBytes(fromTheBack[fromTheBack.Length - 3], key2.C, key2.D);
 			}
 
-			acc += MixSixteenBytes(data.Slice(0), keys[0]);
-			acc += MixSixteenBytes(data.Slice(len - 16), keys[1]);
+			if (fromTheFront.Length > 2)
+			{
+				acc += MixSixteenBytes(fromTheFront[1], key.E, key.F);
+				acc += MixSixteenBytes(fromTheBack[fromTheBack.Length - 2], key.G, key.H);
+			}
+
+			acc += MixSixteenBytes(fromTheFront[0], key.A, key.B);
+			acc += MixSixteenBytes(fromTheBack[fromTheBack.Length - 1], key.C, key.D);
 
 			return Avalanche(acc);
 		}
 
-		private static ulong ZeroToSixteenBytes(in ReadOnlySpan<byte> data, ulong seed)
+
+		private static ulong ZeroToSixteenBytes(ReadOnlySpan<byte> data, ulong seed)
 		{
 			if (data.Length > 8) return NineToSixteenBytes(data, seed);
 			if (data.Length >= 4) return FourToEightBytes(data, seed);
@@ -198,7 +225,7 @@ namespace xxHash3
 			return seed;
 		}
 
-		private static ulong OneToThreeBytes(in ReadOnlySpan<byte> data, ulong seed)
+		private static ulong OneToThreeBytes(ReadOnlySpan<byte> data, ulong seed)
 		{
 			byte c1 = data[0];
 			byte c2 = data[data.Length >> 1];
@@ -209,7 +236,7 @@ namespace xxHash3
 			return Avalanche(ll11);
 		}
 
-		private static ulong FourToEightBytes(in ReadOnlySpan<byte> data, ulong seed)
+		private static ulong FourToEightBytes(ReadOnlySpan<byte> data, ulong seed)
 		{
 			ulong acc = PRIME64_1 * ((uint)data.Length + seed);
 			uint l1 = BinaryPrimitives.ReadUInt32LittleEndian(data) + kKey_1_left;
@@ -218,7 +245,7 @@ namespace xxHash3
 			return Avalanche(acc);
 		}
 
-		private static ulong NineToSixteenBytes(in ReadOnlySpan<byte> data, ulong seed)
+		private static ulong NineToSixteenBytes(ReadOnlySpan<byte> data, ulong seed)
 		{
 			ulong acc = PRIME64_1 * ((uint)data.Length + seed);
 			ulong ll1 = BinaryPrimitives.ReadUInt64LittleEndian(data) + kKey_1;
@@ -227,6 +254,7 @@ namespace xxHash3
 			return Avalanche(acc);
 		}
 
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		private static ulong Avalanche(ulong h64)
 		{
 			h64 ^= h64 >> 29;
@@ -235,21 +263,14 @@ namespace xxHash3
 			return h64;
 		}
 
-		private static ulong MixSixteenBytes(in ReadOnlySpan<byte> data, in KeyPairPair key)
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		private static ulong MixSixteenBytes(UserDataUlongPair data, KeyPair left, KeyPair right)
 		{
-			return MultiplyAdd64(
-					   BinaryPrimitives.ReadUInt64LittleEndian(data) ^ key.First.Key64,
-					   BinaryPrimitives.ReadUInt64LittleEndian(data.Slice(8)) ^ key.Second.Key64);
+			return MultiplyAdd64(data.Left ^ left.Key64, data.Right ^ right.Key64);
 		}
 
-		private static ulong MixTwoAccumulators(in ReadOnlySpan<ulong> acc, in KeyPairPair key)
+		private static void AccumulateStripe(Span<ulong> acc, in Stripe data, in OctoKey theKeys)
 		{
-			return MultiplyAdd64(acc[0] ^ key.First.Key64, acc[1] ^ key.Second.Key64);
-		}
-
-		private static void AccumulateStripe(in Span<ulong> acc, in Stripe data, in ReadOnlySpan<KeyPair> keys)
-		{
-			ref var theKeys = ref MemoryMarshal.GetReference(MemoryMarshal.Cast<KeyPair, OctoKey>(keys));
 			//Hand unrolled...
 			AccumulateOnePair(ref Unsafe.Add(ref MemoryMarshal.GetReference(acc), 0), data.A, theKeys.A);
 			AccumulateOnePair(ref Unsafe.Add(ref MemoryMarshal.GetReference(acc), 1), data.B, theKeys.B);
@@ -272,45 +293,33 @@ namespace xxHash3
 
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		private static void ScrambleAccumulators(in Span<ulong> acc, in ReadOnlySpan<uint> key)
+		private static void ScrambleAccumulators(Span<ulong> acc)
 		{
+			var keys = Safeish.AsSpan<OctoKey, KeyPair>(Keys.Scramble);
 			for (int i = 0; i < acc.Length; i++)
 			{
 				acc[i] ^= acc[i] >> 47;
-				ulong p1 = Multiply32to64((uint)acc[i], key[2 * i]);
-				ulong p2 = Multiply32to64((uint)(acc[i] >> 32), key[2 * i + 1]);
+				ulong p1 = Multiply32to64((uint)acc[i], keys[i].Left);
+				ulong p2 = Multiply32to64((uint)(acc[i] >> 32), keys[i].Right);
 				acc[i] = p1 ^ p2;
 			}
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		private static void AccumulateStripeBlock(in Span<ulong> acc, in ReadOnlySpan<Stripe> stripes, ReadOnlySpan<KeyPair> key)
+		private static void AccumulateStripeBlock(Span<ulong> acc, ReadOnlySpan<Stripe> stripes)
 		{
+			var keysSpan = Safeish.AsSpan<UnshingledKeys<OctoKey>, OctoKey>(Keys);
 			for (int i = 0; i < stripes.Length; i++)
 			{
-				AccumulateStripe(acc, stripes[i], key);
-				key = key.Slice(1);
+				AccumulateStripe(acc, stripes[i], keysSpan[i]);
 			}
 		}
 
 		public static bool UseAvx2;
 		public static bool UseSse2;
 
-		private static void LongSequenceHashInternal(in Span<ulong> acc, in ReadOnlySpan<byte> data)
+		private static void LongSequenceHashInternal(Span<ulong> acc, ReadOnlySpan<byte> data)
 		{
-#if NETCOREAPP3_0
-			if (System.Runtime.Intrinsics.X86.Avx2.IsSupported && UseAvx2)
-			{
-				AccumulateStripes_AVX2(data, acc);
-				return;
-			}
-			if (System.Runtime.Intrinsics.X86.Sse2.IsSupported && UseSse2)
-			{
-				AccumulateStripes_SSE2(data, acc);
-				return;
-			}
-#endif
-
 			var keys = MemoryMarshal.Cast<uint, KeyPair>(kKey);
 			var stripes = MemoryMarshal.Cast<byte, Stripe>(data);
 				
@@ -318,36 +327,23 @@ namespace xxHash3
 			{
 				var blockStripes = stripes.Slice(0, STRIPES_PER_BLOCK);
 				stripes = stripes.Slice(STRIPES_PER_BLOCK);
-				AccumulateStripeBlock(acc, blockStripes, keys);
-				ScrambleAccumulators(acc, kKey.AsSpan(KEYSET_DEFAULT_SIZE - STRIPE_ELEMENTS));
+				AccumulateStripeBlock(acc, blockStripes);
+				ScrambleAccumulators(acc);
 			}
 
 			/* last partial block */
-			AccumulateStripeBlock(acc, stripes, keys);
+			AccumulateStripeBlock(acc, stripes);
 
 			/* last stripe */
 			if ((data.Length & (Unsafe.SizeOf<Stripe>() - 1)) != 0)
 			{
-				ref readonly Stripe stripe = ref data.Slice(data.Length - Unsafe.SizeOf<Stripe>()).First<Stripe>();
-				AccumulateStripe(acc, stripe , keys.Slice(stripes.Length));
+				var keysSpan = Safeish.AsSpan<UnshingledKeys<OctoKey>, OctoKey>(Keys);
+				ref readonly Stripe stripe = ref data.Last<Stripe>();
+				AccumulateStripe(acc, stripe , keysSpan[stripes.Length]);
 			}
 		}
 
-
-		private static ulong MergeAccumulators(in Span<ulong> acc, ulong start)
-		{
-			var keys = MemoryMarshal.Cast<uint, KeyPairPair>(kKey);
-			ulong result64 = start;
-
-			result64 += MixTwoAccumulators(acc, keys[0]);
-			result64 += MixTwoAccumulators(acc.Slice(2), keys[1]);
-			result64 += MixTwoAccumulators(acc.Slice(4), keys[2]);
-			result64 += MixTwoAccumulators(acc.Slice(6), keys[3]);
-
-			return Avalanche(result64);
-		}
-
-		private static ulong HashLongSequence64(in ReadOnlySpan<byte> data, ulong seed)
+		private static ulong HashLongSequence64(ReadOnlySpan<byte> data, ulong seed)
 		{
 			Span<ulong> acc = stackalloc ulong[8];
 			acc[0] = seed;
@@ -359,12 +355,31 @@ namespace xxHash3
 			acc[6] = seed;
 			acc[7] = 0; //already zeroed, but allows for stripping localsinit if one so desires
 
-			LongSequenceHashInternal(acc, data);
-
+#if NETCOREAPP3_0
+			if (System.Runtime.Intrinsics.X86.Avx2.IsSupported && UseAvx2)
+			{
+				LongSequenceHash_AVX2(data, acc);
+			}
+			else if (System.Runtime.Intrinsics.X86.Sse2.IsSupported && UseSse2)
+			{
+				LongSequenceHash_SSE2(data, acc);
+			}
+			else
+#endif
+			{
+				LongSequenceHashInternal(acc, data);
+			}
 			/* converge into final hash */
-			return MergeAccumulators(acc, (ulong)data.Length * PRIME64_1);
+			ref readonly var key = ref Keys.K00;
+			ulong result64 = (ulong)data.Length * PRIME64_1;
+			result64 += MultiplyAdd64(acc[0] ^ key.A.Key64, acc[1] ^ key.B.Key64);
+			result64 += MultiplyAdd64(acc[2] ^ key.C.Key64, acc[3] ^ key.D.Key64);
+			result64 += MultiplyAdd64(acc[4] ^ key.E.Key64, acc[5] ^ key.F.Key64);
+			result64 += MultiplyAdd64(acc[6] ^ key.G.Key64, acc[7] ^ key.H.Key64);
+			return Avalanche(result64);
 		}
 
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		private static unsafe ulong MultiplyAdd64(ulong lhs, ulong rhs)
 		{
 #if NETCOREAPP3_0
@@ -375,6 +390,11 @@ namespace xxHash3
 				return lowHalf + highHalf;
 			}
 #endif
+			return MultiplyAdd64Slow(lhs, rhs);
+		}
+
+		private static unsafe ulong MultiplyAdd64Slow(ulong lhs, ulong rhs)
+		{
 			/* emulate 64x64->128b multiplication, using four 32x32->64 */
 			uint lhsHigh = (uint)(lhs >> 32);
 			uint rhsHigh = (uint)(rhs >> 32);

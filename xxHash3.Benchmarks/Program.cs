@@ -12,6 +12,7 @@ using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Order;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 namespace xxHash3
 {
@@ -20,9 +21,9 @@ namespace xxHash3
 		static void Main()
 		{
 			//var test = new LongKeyTests();
-			//test.ByteLength = 512 * 1024;
+			//test.ByteLength = 128 * 1024;
 			//test.Setup();
-			//for (int i = 0; i < 327680; i++)
+			//for (int i = 0; i < 3276800; i++)
 			//{
 			//	test.XxHash3AVX2();
 			//}
@@ -160,8 +161,8 @@ namespace xxHash3
 	{
 		private byte[] _bytes;
 
-		//[Params(5, 10, 50, 1000, 1_000_000)]
-		[Params(512 * 1024, 102400)]
+		//[Params(5, 10, 50, 1000, 102400)]
+		[Params(102400)]
 		public int ByteLength { get; set; } = 1_000_000;
 
 		[GlobalSetup]
@@ -178,7 +179,6 @@ namespace xxHash3
 			}
 			return bytes;
 		}
-
 
 		//[Benchmark]
 		public ulong XxHash64() => xxHash64.Hash(_bytes);

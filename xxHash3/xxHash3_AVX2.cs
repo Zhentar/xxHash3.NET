@@ -8,97 +8,74 @@ namespace xxHash3
 {
 	public partial class xxHash3
 	{
-		private static void HWIntrinsicsInit_AVX2()
-		{
-
-		}
-
 		private readonly struct Vec256Pair<T> where T : unmanaged
 		{
 			public readonly Vector256<T> A;
 			public readonly Vector256<T> B;
 		}
 
-		[StructLayout(LayoutKind.Sequential)]
-		private struct StripeBlock_AVX2
+		private struct MutableVec256Pair
 		{
-			public readonly Vec256Pair<uint> S00;
-			public readonly Vec256Pair<uint> S01;
-			public readonly Vec256Pair<uint> S02;
-			public readonly Vec256Pair<uint> S03;
-			public readonly Vec256Pair<uint> S04;
-			public readonly Vec256Pair<uint> S05;
-			public readonly Vec256Pair<uint> S06;
-			public readonly Vec256Pair<uint> S07;
-			public readonly Vec256Pair<uint> S08;
-			public readonly Vec256Pair<uint> S09;
-			public readonly Vec256Pair<uint> S10;
-			public readonly Vec256Pair<uint> S11;
-			public readonly Vec256Pair<uint> S12;
-			public readonly Vec256Pair<uint> S13;
-			public readonly Vec256Pair<uint> S14;
-			public readonly Vec256Pair<uint> S15;
+			public Vector256<ulong> A;
+			public Vector256<ulong> B;
 		}
 
-		private static void AccumulateStripes_AVX2(in ReadOnlySpan<byte> userData, in Span<ulong> accumulators)
+		private static void LongSequenceHash_AVX2(ReadOnlySpan<byte> userData, Span<ulong> accumulators)
 		{
-			ref var accPair = ref MemoryMarshal.AsRef<Vec256Pair<ulong>>(MemoryMarshal.AsBytes(accumulators));
-
 			var unprocessedData = userData;
-			var blocks = unprocessedData.PopAll<StripeBlock_AVX2>();
+			var blocks = unprocessedData.PopAll<StripeBlock<Vec256Pair<uint>>>();
+			ref var acc = ref MemoryMarshal.AsRef<MutableVec256Pair>(MemoryMarshal.AsBytes(accumulators));
 
-			var accVec = MemoryMarshal.Cast<ulong, Vector256<ulong>>(accumulators);
+			ProcessFullStripeBlocks_AVX2(blocks, ref acc);
 
-			ref readonly var keys2 = ref Safeish.As<UnshingledKeys<OctoKey>, UnshingledKeys<Vec256Pair<uint>>>(Keys);
-			ProcessFullStripeBlocks_AVX2(blocks, accVec, keys2);
-
-
+			if (unprocessedData.Length == 0) { goto Exit; /*Goto dedupes function epilog*/ }
 
 			var dataVec = MemoryMarshal.Cast<byte, Vec256Pair<uint>>(unprocessedData);
-			int remainingStripes = dataVec.Length;
-			if ((userData.Length & (Unsafe.SizeOf<Stripe>() - 1)) != 0) { remainingStripes++; }
+			var keysSpan = Safeish.AsSpan<UnshingledKeys<OctoKey>, Vec256Pair<uint>>(Keys);
 
-			if(remainingStripes == 0) { return; }
-
-			var accA = accVec[0];
-			var accB = accVec[1];
-
-			var lastStripeVec = MemoryMarshal.Cast<byte, Vec256Pair<uint>>(userData.Slice(userData.Length - Unsafe.SizeOf<Stripe>()))[0];
-			var keysSpan = Safeish.AsSpan<UnshingledKeys<Vec256Pair<uint>>, Vec256Pair<uint>>(keys2);
+			var accA = acc.A;
+			var accB = acc.B;
 			int j = 0;
-			for (; j < remainingStripes - 1; j++)
+			for (; j < dataVec.Length; j++)
 			{
-				ref readonly var data = ref dataVec[j];
-				accA = ProcessStripePiece_AVX2(keysSpan[j].A, accA, data.A);
-				accB = ProcessStripePiece_AVX2(keysSpan[j].B, accB, data.B);
+				accA = ProcessStripePiece_AVX2(keysSpan[j].A, accA, dataVec[j].A);
+				accB = ProcessStripePiece_AVX2(keysSpan[j].B, accB, dataVec[j].B);
 			}
-			accVec[0] = ProcessStripePiece_AVX2(keysSpan[j].A, accA, lastStripeVec.A);
-			accVec[1] = ProcessStripePiece_AVX2(keysSpan[j].B, accB, lastStripeVec.B);
+			if ((userData.Length & (Unsafe.SizeOf<Stripe>() - 1)) != 0)
+			{
+				ref readonly var lastStripeVec = ref userData.Last<Vec256Pair<uint>>();
+				accA = ProcessStripePiece_AVX2(keysSpan[j].A, accA, lastStripeVec.A);
+				accB = ProcessStripePiece_AVX2(keysSpan[j].B, accB, lastStripeVec.B);
+			}
+			acc.A = accA;
+			acc.B = accB;
 
+		Exit:
+			return;
 		}
 
 		//Splitting this out for convenience while optimizing
-		private static void ProcessFullStripeBlocks_AVX2(/*in*/ ReadOnlySpan<StripeBlock_AVX2> blocks,/*in */Span<Vector256<ulong>> accVec, in UnshingledKeys<Vec256Pair<uint>> keys2)
+		private static void ProcessFullStripeBlocks_AVX2(ReadOnlySpan<StripeBlock<Vec256Pair<uint>>> blocks,ref MutableVec256Pair acc)
 		{
-			if( 2u < (uint)accVec.Length) { return; } //Conceptually this should be a throw but the goal here it to satisfy the JIT regarding bounds checks (doesn't seem like it's working, though)
-			var accA = accVec[0];
-			var accB = accVec[1];
+			ref readonly var keys2 = ref Safeish.As<UnshingledKeys<OctoKey>, UnshingledKeys<Vec256Pair<uint>>>(Keys);
+			var accA = acc.A;
+			var accB = acc.B;
 
 
-			//There are 16 AVX registers. The generated code only needs four of them. So caching a bunch of the loads
+			//There are 16 AVX registers. The generated code only needs five of them. So caching a bunch of the loads
 			//here makes use of those registers effectively for free, and reduces the odds of paying penalties
 			//for cache-line crossing loads in the main loop.
+			var K00B04A = keys2.K00.B;
 			var K01B05A = keys2.K01.B;
+			var K02B06A = keys2.K02.B;
 			var K03B07A = keys2.K03.B;
+			var K04B08A = keys2.K04.B;
 			var K05B09A = keys2.K05.B;
 			var K07B11A = keys2.K07.B;
 			var K09B13A = keys2.K09.B;
-			var K11B15A = keys2.K11.B;
-			var K00B04A = keys2.K00.B;
-			var K02B06A = keys2.K02.B;
-			var K12B16A = keys2.K12.B;
-			var K04B08A = keys2.K04.B;
 			var K10B14A = keys2.K10.B;
+			var K11B15A = keys2.K11.B;
+			var K12B16A = keys2.K12.B;
 
 
 			for (int i = 0; i < blocks.Length; i++)
@@ -141,10 +118,12 @@ namespace xxHash3
 				accB = ScrambleAccumulators_AVX2(accB, keys2.Scramble.B);
 			}
 
-			accVec[0] = accA;
-			accVec[1] = accB;
+			acc.A = accA;
+			acc.B = accB;
 		}
 
+
+		//Test in for key once https://github.com/dotnet/coreclr/pull/22944 merges
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		private static Vector256<ulong> ProcessStripePiece_AVX2(/*in*/ Vector256<uint> key, Vector256<ulong> acc, Vector256<uint> data)
 		{

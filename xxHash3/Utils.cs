@@ -11,6 +11,15 @@ namespace xxHash3
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static ReadOnlySpan<TTo> PopAll<TTo>(this ref ReadOnlySpan<byte> @this) where TTo : struct
 		{
+#if NETCOREAPP3_0
+			var totBytes = @this.Length;
+			var toLength = (totBytes / Unsafe.SizeOf<TTo>());
+			var sliceLength = toLength * Unsafe.SizeOf<TTo>();
+			ref var thisRef = ref MemoryMarshal.GetReference(@this);
+			@this = MemoryMarshal.CreateReadOnlySpan(ref Unsafe.Add(ref thisRef, sliceLength), totBytes - sliceLength);
+			return MemoryMarshal.CreateReadOnlySpan(ref Unsafe.As<byte, TTo>(ref thisRef), toLength);
+#endif
+
 			return @this.PopAll<TTo, byte>();
 		}
 
@@ -20,16 +29,25 @@ namespace xxHash3
 			var totBytes = @this.Length * Unsafe.SizeOf<TFrom>();
 			var toLength = (totBytes / Unsafe.SizeOf<TTo>());
 			var sliceLength = toLength * Unsafe.SizeOf<TTo>() / Unsafe.SizeOf<TFrom>();
-#if NETCOREAPP2_1 || NETCOREAPP3_0
-			var result = MemoryMarshal.CreateReadOnlySpan(ref Unsafe.As<TFrom, TTo>(ref MemoryMarshal.GetReference(@this)), toLength);
-#else
+
+#if NETSTANDARD2_0
 			var result = MemoryMarshal.Cast<TFrom, TTo>(@this);
+#else
+			var result = MemoryMarshal.CreateReadOnlySpan(ref Unsafe.As<TFrom, TTo>(ref MemoryMarshal.GetReference(@this)), toLength);
 #endif
 			@this = @this.Slice(sliceLength);
 			return result;
 		}
 
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static uint AsLittleEndian(this uint @this)
+		{
+			if (BitConverter.IsLittleEndian) { return @this; }
+			return BinaryPrimitives.ReverseEndianness(@this);
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static ulong AsLittleEndian(this ulong @this)
 		{
 			if (BitConverter.IsLittleEndian) { return @this; }
 			return BinaryPrimitives.ReverseEndianness(@this);
@@ -48,7 +66,17 @@ namespace xxHash3
 			return false;
 		}
 
-		public static ref readonly TTo First<TTo>(this ReadOnlySpan<byte> @this) where TTo : struct => ref @this.First<byte, TTo>();
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static ref readonly TTo First<TTo>(this ReadOnlySpan<byte> @this) where TTo : struct
+		{
+			return ref MemoryMarshal.Cast<byte, TTo>(@this)[0];
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static ref readonly TTo Last<TTo>(this ReadOnlySpan<byte> @this) where TTo : struct
+		{
+			return ref MemoryMarshal.Cast<byte, TTo>(@this.Slice(@this.Length - Unsafe.SizeOf<TTo>()))[0];
+		}
 
 		public static ref readonly TTo First<TFrom, TTo>(this ReadOnlySpan<TFrom> @this) where TTo : struct where TFrom : struct
 		{
@@ -64,12 +92,14 @@ namespace xxHash3
 
 	public static class Safeish
 	{
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static ref readonly TTo As<TFrom, TTo>(in TFrom from) where TTo : struct where TFrom : struct
 		{
 			if(Unsafe.SizeOf<TFrom>() < Unsafe.SizeOf<TTo>()) { throw new InvalidCastException(); }
 			return ref Unsafe.As<TFrom, TTo>(ref Unsafe.AsRef(from));
 		}
 
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static ReadOnlySpan<TTo> AsSpan<TFrom, TTo>(in TFrom from) where TTo : struct where TFrom : struct
 		{
 #if NETSTANDARD2_0

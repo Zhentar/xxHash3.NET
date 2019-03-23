@@ -9,7 +9,7 @@ namespace xxHash3
 {
 	public partial class xxHash3
 	{
-		private static int AccumulateStripes_SSE2(in ReadOnlySpan<byte> userData, in Span<ulong> accumulators)
+		private static int LongSequenceHash_SSE2(ReadOnlySpan<byte> userData, Span<ulong> accumulators)
 		{
 			const int VEC128_PER_STRIPE = STRIPE_BYTES / 16;
 			var keys = MemoryMarshal.Cast<uint, KeyPair>(kKey);
