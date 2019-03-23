@@ -68,6 +68,8 @@ namespace xxHash3
 			return;
 		}
 
+		//Powershell "template" code for this:
+		//@("A","B","C","D") | % { Set-Variable -Name "letter" -Value $_  -PassThru } | % { 0..15 | % { 'acc{1} = ProcessStripePiece_SSE2(keys.K{0:D2}.{1}, acc{1}, block.S{0:D2}.{1});' -f ( $_, $letter) } }
 		private static void ProcessFullStripeBlocks_SSE2(ReadOnlySpan<StripeBlock<Vec128Quad>> blocks, ref MutableVec128Quad acc)
 		{
 			ref readonly var keys = ref Safeish.As<UnshingledKeys<OctoKey>, UnshingledKeys<Vec128Quad>>(Keys);
@@ -150,14 +152,11 @@ namespace xxHash3
 				accD = ScrambleAccumulators_SSE2(accD, keys.Scramble.D);
 			}
 
-
 			acc.A = accA;
 			acc.B = accB;
 			acc.C = accC;
 			acc.D = accD;
 		}
-
-
 
 		//Test in for key once https://github.com/dotnet/coreclr/pull/22944 merges
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]

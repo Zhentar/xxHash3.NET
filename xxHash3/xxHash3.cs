@@ -51,136 +51,6 @@ namespace xxHash3
 			Keys = MemoryMarshal.Cast<OctoKey, UnshingledKeys<OctoKey>>(unshingledKeys)[0];
 		}
 
-		private struct UnshingledKeys<T>
-		{
-			public readonly T K00;
-			public readonly T K01;
-			public readonly T K02;
-			public readonly T K03;
-			public readonly T K04;
-			public readonly T K05;
-			public readonly T K06;
-			public readonly T K07;
-			public readonly T K08;
-			public readonly T K09;
-			public readonly T K10;
-			public readonly T K11;
-			public readonly T K12;
-			public readonly T K13;
-			public readonly T K14;
-			public readonly T K15;
-			public readonly T Scramble;
-		}
-
-		[StructLayout(LayoutKind.Sequential)]
-		private struct Stripe
-		{
-			//Unfortunately, fixed can't be used with user defined structs, so we get this instead...
-			public readonly UintPair A;
-			public readonly UintPair B;
-			public readonly UintPair C;
-			public readonly UintPair D;
-			public readonly UintPair E;
-			public readonly UintPair F;
-			public readonly UintPair G;
-			public readonly UintPair H;
-		}
-
-		[StructLayout(LayoutKind.Explicit)]
-		private readonly struct UintPair
-		{
-			[FieldOffset(0)]
-			private readonly uint _left;
-			[FieldOffset(4)]
-			private readonly uint _right;
-			[FieldOffset(0)]
-			private readonly ulong _value64;
-			public uint Left => _left.AsLittleEndian();
-			public uint Right => _right.AsLittleEndian();
-
-			public ulong Value64
-			{
-				[MethodImpl(MethodImplOptions.AggressiveInlining)]
-				get => BitConverter.IsLittleEndian ? _value64 : Left + ((ulong)Right << 32);
-			}
-		}
-
-		[StructLayout(LayoutKind.Sequential)]
-		private readonly struct UserDataUlongPair
-		{
-			private readonly ulong _left;
-			private readonly ulong _right;
-			public ulong Left => _left.AsLittleEndian();
-			public ulong Right => _right.AsLittleEndian();
-		}
-
-
-		[StructLayout(LayoutKind.Explicit)]
-		private readonly struct KeyPair
-		{
-			[FieldOffset(0)]
-			public readonly uint Left;
-			[FieldOffset(4)]
-			public readonly uint Right;
-			[FieldOffset(0)]
-			private readonly ulong _key64;
-
-			public ulong Key64
-			{
-				[MethodImpl(MethodImplOptions.AggressiveInlining)]
-				get => BitConverter.IsLittleEndian ? _key64 : Left + ((ulong)Right << 32);
-			}
-
-			public KeyPair(uint left, uint right) => (_key64, Left, Right) = (0ul, left, right);
-		}
-		
-		[StructLayout(LayoutKind.Sequential)]
-		private struct OctoKey
-		{
-			public readonly KeyPair A;
-			public readonly KeyPair B;
-			public readonly KeyPair C;
-			public readonly KeyPair D;
-			public readonly KeyPair E;
-			public readonly KeyPair F;
-			public readonly KeyPair G;
-			public readonly KeyPair H;
-		}
-
-		[StructLayout(LayoutKind.Sequential)]
-		private struct OctoAccumulator
-		{
-			public ulong A;
-			public ulong B;
-			public ulong C;
-			public ulong D;
-			public ulong E;
-			public ulong F;
-			public ulong G;
-			public ulong H;
-		}
-
-
-		[StructLayout(LayoutKind.Sequential)]
-		private struct StripeBlock<T> where T : struct
-		{
-			public readonly T S00;
-			public readonly T S01;
-			public readonly T S02;
-			public readonly T S03;
-			public readonly T S04;
-			public readonly T S05;
-			public readonly T S06;
-			public readonly T S07;
-			public readonly T S08;
-			public readonly T S09;
-			public readonly T S10;
-			public readonly T S11;
-			public readonly T S12;
-			public readonly T S13;
-			public readonly T S14;
-			public readonly T S15;
-		}
 
 
 		public static ulong Hash64(ReadOnlySpan<byte> data, ulong seed = 0)
@@ -278,66 +148,66 @@ namespace xxHash3
 		private static void AccumulateStripe(ref OctoAccumulator acc, in Stripe data, in OctoKey theKeys)
 		{
 			//Hand unrolled...
-			acc.A = AccumulateOnePair(acc.A, data.A, theKeys.A);
-			acc.B = AccumulateOnePair(acc.B, data.B, theKeys.B);
-			acc.C = AccumulateOnePair(acc.C, data.C, theKeys.C);
-			acc.D = AccumulateOnePair(acc.D, data.D, theKeys.D);
-			acc.E = AccumulateOnePair(acc.E, data.E, theKeys.E);
-			acc.F = AccumulateOnePair(acc.F, data.F, theKeys.F);
-			acc.G = AccumulateOnePair(acc.G, data.G, theKeys.G);
-			acc.H = AccumulateOnePair(acc.H, data.H, theKeys.H);
+			acc.A += AccumulateOnePair(data.A.Left, data.A.Right, theKeys.A.Left, theKeys.A.Right);
+			acc.B += AccumulateOnePair(data.B.Left, data.B.Right, theKeys.B.Left, theKeys.B.Right);
+			acc.C += AccumulateOnePair(data.C.Left, data.C.Right, theKeys.C.Left, theKeys.C.Right);
+			acc.D += AccumulateOnePair(data.D.Left, data.D.Right, theKeys.D.Left, theKeys.D.Right);
+			acc.E += AccumulateOnePair(data.E.Left, data.E.Right, theKeys.E.Left, theKeys.E.Right);
+			acc.F += AccumulateOnePair(data.F.Left, data.F.Right, theKeys.F.Left, theKeys.F.Right);
+			acc.G += AccumulateOnePair(data.G.Left, data.G.Right, theKeys.G.Left, theKeys.G.Right);
+			acc.H += AccumulateOnePair(data.H.Left, data.H.Right, theKeys.H.Left, theKeys.H.Right);     
 		}
 
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		private static ulong AccumulateOnePair(ulong acc, UintPair value, KeyPair key)
-		{
-			var dataLeft = value.Left;
-			var dataRight = value.Right;
-			var mul = Multiply32to64(dataLeft + key.Left, dataRight + key.Right);
-			acc += mul + dataLeft + ((ulong)dataRight << 32);
-			return acc;
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		private static void ScrambleAccumulators_Scalar(ref OctoAccumulator accumulator)
-		{
-			var keys = Safeish.AsSpan<OctoKey, KeyPair>(Keys.Scramble);
-			var acc = Safeish.AsMutableSpan<OctoAccumulator, ulong>(ref accumulator);
-			for (int i = 0; i < acc.Length; i++)
-			{
-				acc[i] ^= acc[i] >> 47;
-				ulong p1 = Multiply32to64((uint)acc[i], keys[i].Left);
-				ulong p2 = Multiply32to64((uint)(acc[i] >> 32), keys[i].Right);
-				acc[i] = p1 ^ p2;
-			}
-		}
-
-		private static void AccumulateStripeBlocks_Scalar(ref OctoAccumulator acc, ReadOnlySpan<StripeBlock<Stripe>> blocks)
+		private static void AccumulateStripeBlocks_ScalarPiecewise(ref OctoAccumulator acc, ReadOnlySpan<StripeBlock<Stripe>> blocks)
 		{
 			ref readonly var keys = ref Keys;
 
 			for (int i = 0; i < blocks.Length; i++)
 			{
 				ref readonly var stripes = ref blocks[i];
-				AccumulateStripe(ref acc, stripes.S00, keys.K00);
-				AccumulateStripe(ref acc, stripes.S01, keys.K01);
-				AccumulateStripe(ref acc, stripes.S02, keys.K02);
-				AccumulateStripe(ref acc, stripes.S03, keys.K03);
-				AccumulateStripe(ref acc, stripes.S04, keys.K04);
-				AccumulateStripe(ref acc, stripes.S05, keys.K05);
-				AccumulateStripe(ref acc, stripes.S06, keys.K06);
-				AccumulateStripe(ref acc, stripes.S07, keys.K07);
-				AccumulateStripe(ref acc, stripes.S08, keys.K08);
-				AccumulateStripe(ref acc, stripes.S09, keys.K09);
-				AccumulateStripe(ref acc, stripes.S10, keys.K10);
-				AccumulateStripe(ref acc, stripes.S11, keys.K11);
-				AccumulateStripe(ref acc, stripes.S12, keys.K12);
-				AccumulateStripe(ref acc, stripes.S13, keys.K13);
-				AccumulateStripe(ref acc, stripes.S14, keys.K14);
-				AccumulateStripe(ref acc, stripes.S15, keys.K15);
-				ScrambleAccumulators_Scalar(ref acc);
+				AccumulateStripeBlock_ScalarPiecewise<AAccessor>(ref acc, stripes, keys);
+				AccumulateStripeBlock_ScalarPiecewise<BAccessor>(ref acc, stripes, keys);
+				AccumulateStripeBlock_ScalarPiecewise<CAccessor>(ref acc, stripes, keys);
+				AccumulateStripeBlock_ScalarPiecewise<DAccessor>(ref acc, stripes, keys);
+				AccumulateStripeBlock_ScalarPiecewise<EAccessor>(ref acc, stripes, keys);
+				AccumulateStripeBlock_ScalarPiecewise<FAccessor>(ref acc, stripes, keys);
+				AccumulateStripeBlock_ScalarPiecewise<GAccessor>(ref acc, stripes, keys);
+				AccumulateStripeBlock_ScalarPiecewise<HAccessor>(ref acc, stripes, keys);
 			}
+		}
 
+		private static void AccumulateStripeBlock_ScalarPiecewise<T>(ref OctoAccumulator accumulator, in StripeBlock<Stripe> stripes, in UnshingledKeys<OctoKey> keys) where T : IAccumulatorWiseAccessor
+		{
+			T accessor = default;
+			ulong acc = accessor.Piece(accumulator);
+			acc += AccumulateOnePair(accessor.Piece(stripes.S00).Left, accessor.Piece(stripes.S00).Right, accessor.Piece(keys.K00).Left, accessor.Piece(keys.K00).Right);
+			acc += AccumulateOnePair(accessor.Piece(stripes.S01).Left, accessor.Piece(stripes.S01).Right, accessor.Piece(keys.K01).Left, accessor.Piece(keys.K01).Right);
+			acc += AccumulateOnePair(accessor.Piece(stripes.S02).Left, accessor.Piece(stripes.S02).Right, accessor.Piece(keys.K02).Left, accessor.Piece(keys.K02).Right);
+			acc += AccumulateOnePair(accessor.Piece(stripes.S03).Left, accessor.Piece(stripes.S03).Right, accessor.Piece(keys.K03).Left, accessor.Piece(keys.K03).Right);
+			acc += AccumulateOnePair(accessor.Piece(stripes.S04).Left, accessor.Piece(stripes.S04).Right, accessor.Piece(keys.K04).Left, accessor.Piece(keys.K04).Right);
+			acc += AccumulateOnePair(accessor.Piece(stripes.S05).Left, accessor.Piece(stripes.S05).Right, accessor.Piece(keys.K05).Left, accessor.Piece(keys.K05).Right);
+			acc += AccumulateOnePair(accessor.Piece(stripes.S06).Left, accessor.Piece(stripes.S06).Right, accessor.Piece(keys.K06).Left, accessor.Piece(keys.K06).Right);
+			acc += AccumulateOnePair(accessor.Piece(stripes.S07).Left, accessor.Piece(stripes.S07).Right, accessor.Piece(keys.K07).Left, accessor.Piece(keys.K07).Right);
+			acc += AccumulateOnePair(accessor.Piece(stripes.S08).Left, accessor.Piece(stripes.S08).Right, accessor.Piece(keys.K08).Left, accessor.Piece(keys.K08).Right);
+			acc += AccumulateOnePair(accessor.Piece(stripes.S09).Left, accessor.Piece(stripes.S09).Right, accessor.Piece(keys.K09).Left, accessor.Piece(keys.K09).Right);
+			acc += AccumulateOnePair(accessor.Piece(stripes.S10).Left, accessor.Piece(stripes.S10).Right, accessor.Piece(keys.K10).Left, accessor.Piece(keys.K10).Right);
+			acc += AccumulateOnePair(accessor.Piece(stripes.S11).Left, accessor.Piece(stripes.S11).Right, accessor.Piece(keys.K11).Left, accessor.Piece(keys.K11).Right);
+			acc += AccumulateOnePair(accessor.Piece(stripes.S12).Left, accessor.Piece(stripes.S12).Right, accessor.Piece(keys.K12).Left, accessor.Piece(keys.K12).Right);
+			acc += AccumulateOnePair(accessor.Piece(stripes.S13).Left, accessor.Piece(stripes.S13).Right, accessor.Piece(keys.K13).Left, accessor.Piece(keys.K13).Right);
+			acc += AccumulateOnePair(accessor.Piece(stripes.S14).Left, accessor.Piece(stripes.S14).Right, accessor.Piece(keys.K14).Left, accessor.Piece(keys.K14).Right);
+			acc += AccumulateOnePair(accessor.Piece(stripes.S15).Left, accessor.Piece(stripes.S15).Right, accessor.Piece(keys.K15).Left, accessor.Piece(keys.K15).Right);
+			acc ^= acc >> 47;
+			ulong p1 = Multiply32to64((uint)acc, accessor.Piece(keys.Scramble).Left);
+			ulong p2 = Multiply32to64((uint)(acc >> 32), accessor.Piece(keys.Scramble).Right);
+			acc = p1 ^ p2;
+
+			accessor.SetAcc(ref accumulator, acc);
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		static ulong AccumulateOnePair(uint valueLeft, uint valueRight, uint keyLeft, uint keyRight)
+		{
+			return valueLeft + ((ulong)valueRight << 32) + Multiply32to64(valueLeft + keyLeft, valueRight + keyRight);
 		}
 
 		public static bool UseAvx2;
@@ -348,7 +218,7 @@ namespace xxHash3
 			var unprocessedData = data;
 			ReadOnlySpan<StripeBlock<Stripe>> blocks = unprocessedData.PopAll<StripeBlock<Stripe>>();
 
-			AccumulateStripeBlocks_Scalar(ref acc, blocks);
+			AccumulateStripeBlocks_ScalarPiecewise(ref acc, blocks);
 
 			if (unprocessedData.Length == 0) { goto Exit; /*Goto dedupes function epilog*/ }
 
