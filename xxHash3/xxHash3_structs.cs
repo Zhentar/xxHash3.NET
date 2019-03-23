@@ -8,6 +8,7 @@ namespace xxHash3
 {
 	partial class xxHash3
 	{
+		[StructLayout(LayoutKind.Sequential)]
 		private struct UnshingledKeys<T>
 		{
 			public readonly T K00;

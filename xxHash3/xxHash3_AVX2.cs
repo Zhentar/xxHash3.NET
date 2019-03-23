@@ -8,12 +8,14 @@ namespace xxHash3
 {
 	public partial class xxHash3
 	{
+		[StructLayout(LayoutKind.Sequential)]
 		private readonly struct Vec256Pair<T> where T : unmanaged
 		{
 			public readonly Vector256<T> A;
 			public readonly Vector256<T> B;
 		}
 
+		[StructLayout(LayoutKind.Sequential)]
 		private struct MutableVec256Pair
 		{
 			public Vector256<ulong> A;

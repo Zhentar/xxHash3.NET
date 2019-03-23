@@ -185,22 +185,23 @@ namespace xxHash3
 		{
 			T accessor = default;
 			ulong acc = accessor.Piece(accumulator);
-			acc += AccumulateOnePair(accessor.Piece(stripes.S00).Left, accessor.Piece(stripes.S00).Right, accessor.Piece(keys.K00).Left, accessor.Piece(keys.K00).Right);
-			acc += AccumulateOnePair(accessor.Piece(stripes.S01).Left, accessor.Piece(stripes.S01).Right, accessor.Piece(keys.K01).Left, accessor.Piece(keys.K01).Right);
-			acc += AccumulateOnePair(accessor.Piece(stripes.S02).Left, accessor.Piece(stripes.S02).Right, accessor.Piece(keys.K02).Left, accessor.Piece(keys.K02).Right);
-			acc += AccumulateOnePair(accessor.Piece(stripes.S03).Left, accessor.Piece(stripes.S03).Right, accessor.Piece(keys.K03).Left, accessor.Piece(keys.K03).Right);
-			acc += AccumulateOnePair(accessor.Piece(stripes.S04).Left, accessor.Piece(stripes.S04).Right, accessor.Piece(keys.K04).Left, accessor.Piece(keys.K04).Right);
-			acc += AccumulateOnePair(accessor.Piece(stripes.S05).Left, accessor.Piece(stripes.S05).Right, accessor.Piece(keys.K05).Left, accessor.Piece(keys.K05).Right);
-			acc += AccumulateOnePair(accessor.Piece(stripes.S06).Left, accessor.Piece(stripes.S06).Right, accessor.Piece(keys.K06).Left, accessor.Piece(keys.K06).Right);
-			acc += AccumulateOnePair(accessor.Piece(stripes.S07).Left, accessor.Piece(stripes.S07).Right, accessor.Piece(keys.K07).Left, accessor.Piece(keys.K07).Right);
-			acc += AccumulateOnePair(accessor.Piece(stripes.S08).Left, accessor.Piece(stripes.S08).Right, accessor.Piece(keys.K08).Left, accessor.Piece(keys.K08).Right);
-			acc += AccumulateOnePair(accessor.Piece(stripes.S09).Left, accessor.Piece(stripes.S09).Right, accessor.Piece(keys.K09).Left, accessor.Piece(keys.K09).Right);
-			acc += AccumulateOnePair(accessor.Piece(stripes.S10).Left, accessor.Piece(stripes.S10).Right, accessor.Piece(keys.K10).Left, accessor.Piece(keys.K10).Right);
-			acc += AccumulateOnePair(accessor.Piece(stripes.S11).Left, accessor.Piece(stripes.S11).Right, accessor.Piece(keys.K11).Left, accessor.Piece(keys.K11).Right);
-			acc += AccumulateOnePair(accessor.Piece(stripes.S12).Left, accessor.Piece(stripes.S12).Right, accessor.Piece(keys.K12).Left, accessor.Piece(keys.K12).Right);
-			acc += AccumulateOnePair(accessor.Piece(stripes.S13).Left, accessor.Piece(stripes.S13).Right, accessor.Piece(keys.K13).Left, accessor.Piece(keys.K13).Right);
-			acc += AccumulateOnePair(accessor.Piece(stripes.S14).Left, accessor.Piece(stripes.S14).Right, accessor.Piece(keys.K14).Left, accessor.Piece(keys.K14).Right);
-			acc += AccumulateOnePair(accessor.Piece(stripes.S15).Left, accessor.Piece(stripes.S15).Right, accessor.Piece(keys.K15).Left, accessor.Piece(keys.K15).Right);
+
+			ref readonly var stripe = ref accessor.Piece(stripes.S00); ref readonly var key = ref accessor.Piece(keys.K00); acc += AccumulateOnePair(stripe.Left, stripe.Right, key.Left, key.Right);
+			stripe = ref accessor.Piece(stripes.S01); key = ref accessor.Piece(keys.K01); acc += AccumulateOnePair(stripe.Left, stripe.Right, key.Left, key.Right);
+			stripe = ref accessor.Piece(stripes.S02); key = ref accessor.Piece(keys.K02); acc += AccumulateOnePair(stripe.Left, stripe.Right, key.Left, key.Right);
+			stripe = ref accessor.Piece(stripes.S03); key = ref accessor.Piece(keys.K03); acc += AccumulateOnePair(stripe.Left, stripe.Right, key.Left, key.Right);
+			stripe = ref accessor.Piece(stripes.S04); key = ref accessor.Piece(keys.K04); acc += AccumulateOnePair(stripe.Left, stripe.Right, key.Left, key.Right);
+			stripe = ref accessor.Piece(stripes.S05); key = ref accessor.Piece(keys.K05); acc += AccumulateOnePair(stripe.Left, stripe.Right, key.Left, key.Right);
+			stripe = ref accessor.Piece(stripes.S06); key = ref accessor.Piece(keys.K06); acc += AccumulateOnePair(stripe.Left, stripe.Right, key.Left, key.Right);
+			stripe = ref accessor.Piece(stripes.S07); key = ref accessor.Piece(keys.K07); acc += AccumulateOnePair(stripe.Left, stripe.Right, key.Left, key.Right);
+			stripe = ref accessor.Piece(stripes.S08); key = ref accessor.Piece(keys.K08); acc += AccumulateOnePair(stripe.Left, stripe.Right, key.Left, key.Right);
+			stripe = ref accessor.Piece(stripes.S09); key = ref accessor.Piece(keys.K09); acc += AccumulateOnePair(stripe.Left, stripe.Right, key.Left, key.Right);
+			stripe = ref accessor.Piece(stripes.S10); key = ref accessor.Piece(keys.K10); acc += AccumulateOnePair(stripe.Left, stripe.Right, key.Left, key.Right);
+			stripe = ref accessor.Piece(stripes.S11); key = ref accessor.Piece(keys.K11); acc += AccumulateOnePair(stripe.Left, stripe.Right, key.Left, key.Right);
+			stripe = ref accessor.Piece(stripes.S12); key = ref accessor.Piece(keys.K12); acc += AccumulateOnePair(stripe.Left, stripe.Right, key.Left, key.Right);
+			stripe = ref accessor.Piece(stripes.S13); key = ref accessor.Piece(keys.K13); acc += AccumulateOnePair(stripe.Left, stripe.Right, key.Left, key.Right);
+			stripe = ref accessor.Piece(stripes.S14); key = ref accessor.Piece(keys.K14); acc += AccumulateOnePair(stripe.Left, stripe.Right, key.Left, key.Right);
+			stripe = ref accessor.Piece(stripes.S15); key = ref accessor.Piece(keys.K15); acc += AccumulateOnePair(stripe.Left, stripe.Right, key.Left, key.Right);
 			acc ^= acc >> 47;
 			ulong p1 = Multiply32to64((uint)acc, accessor.Piece(keys.Scramble).Left);
 			ulong p2 = Multiply32to64((uint)(acc >> 32), accessor.Piece(keys.Scramble).Right);
@@ -210,9 +211,9 @@ namespace xxHash3
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		static ulong AccumulateOnePair(uint valueLeft, uint valueRight, uint keyLeft, uint keyRight)
+		static ulong AccumulateOnePair(ulong valueLeft, ulong valueRight, ulong keyLeft, ulong keyRight)
 		{
-			return valueLeft + ((ulong)valueRight << 32) + Multiply32to64(valueLeft + keyLeft, valueRight + keyRight);
+			return valueLeft + (valueRight << 32) + (ulong)(uint)(valueLeft + keyLeft) * (ulong)(uint)(valueRight + keyRight);
 		}
 
 		public static bool UseAvx2;

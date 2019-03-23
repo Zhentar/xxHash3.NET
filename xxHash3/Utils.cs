@@ -18,9 +18,9 @@ namespace xxHash3
 			ref var thisRef = ref MemoryMarshal.GetReference(@this);
 			@this = MemoryMarshal.CreateReadOnlySpan(ref Unsafe.Add(ref thisRef, sliceLength), totBytes - sliceLength);
 			return MemoryMarshal.CreateReadOnlySpan(ref Unsafe.As<byte, TTo>(ref thisRef), toLength);
-#endif
-
+#else
 			return @this.PopAll<TTo, byte>();
+#endif
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
